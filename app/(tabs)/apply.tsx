@@ -7,14 +7,18 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
+  Image,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useLoans } from '@/contexts/LoanContext';
 import { LOAN_TYPES, LOAN_PURPOSES, MAX_REPAYMENT_MONTHS } from '@/constants/loanTypes';
-import { FileText, DollarSign, Calendar, TrendingUp } from 'lucide-react-native';
+import { FileText, DollarSign, Calendar, TrendingUp, Camera, CreditCard, MapPin } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 
 export default function ApplyScreen() {
   const router = useRouter();
@@ -25,6 +29,9 @@ export default function ApplyScreen() {
   const [selectedType, setSelectedType] = useState<string>('personal');
   const [purpose, setPurpose] = useState<string>(LOAN_PURPOSES[0]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [userPhoto, setUserPhoto] = useState<string | null>(null);
+  const [nationalIdPhoto, setNationalIdPhoto] = useState<string | null>(null);
+  const [location, setLocation] = useState<string | null>(null);
 
   const calculation = amount
     ? calculateLoan(
@@ -33,6 +40,93 @@ export default function ApplyScreen() {
         parseInt(repaymentPeriod) || 1
       )
     : null;
+
+  const pickImage = async (type: 'photo' | 'id') => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: type === 'photo' ? [1, 1] : [16, 9],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        if (type === 'photo') {
+          setUserPhoto(result.assets[0].uri);
+        } else {
+          setNationalIdPhoto(result.assets[0].uri);
+        }
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Error', 'Failed to pick image');
+    }
+  };
+
+  const takePhoto = async (type: 'photo' | 'id') => {
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Permission Required', 'Camera permission is required to take photos');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: type === 'photo' ? [1, 1] : [16, 9],
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets[0]) {
+        if (type === 'photo') {
+          setUserPhoto(result.assets[0].uri);
+        } else {
+          setNationalIdPhoto(result.assets[0].uri);
+        }
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (error) {
+      console.error('Error taking photo:', error);
+      Alert.alert('Error', 'Failed to take photo');
+    }
+  };
+
+  const getCurrentLocation = async () => {
+    try {
+      if (Platform.OS === 'web') {
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              const locationString = `${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)}`;
+              setLocation(locationString);
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            },
+            (error) => {
+              console.error('Error getting location:', error);
+              Alert.alert('Error', 'Failed to get location');
+            }
+          );
+        } else {
+          Alert.alert('Error', 'Geolocation is not supported by this browser');
+        }
+      } else {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') {
+          Alert.alert('Permission Required', 'Location permission is required');
+          return;
+        }
+
+        const currentLocation = await Location.getCurrentPositionAsync({});
+        const locationString = `${currentLocation.coords.latitude.toFixed(6)}, ${currentLocation.coords.longitude.toFixed(6)}`;
+        setLocation(locationString);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (error) {
+      console.error('Error getting location:', error);
+      Alert.alert('Error', 'Failed to get location');
+    }
+  };
 
   const handleSubmit = async () => {
     if (!amount || parseFloat(amount) <= 0) {
@@ -48,6 +142,21 @@ export default function ApplyScreen() {
 
     if (period > MAX_REPAYMENT_MONTHS) {
       Alert.alert('Error', `Maximum repayment period is ${MAX_REPAYMENT_MONTHS} months`);
+      return;
+    }
+
+    if (!userPhoto) {
+      Alert.alert('Error', 'Please upload your photo');
+      return;
+    }
+
+    if (!nationalIdPhoto) {
+      Alert.alert('Error', 'Please upload your national ID');
+      return;
+    }
+
+    if (!location) {
+      Alert.alert('Error', 'Please provide your location');
       return;
     }
 
@@ -70,6 +179,9 @@ export default function ApplyScreen() {
           onPress: () => {
             setAmount('');
             setRepaymentPeriod('1');
+            setUserPhoto(null);
+            setNationalIdPhoto(null);
+            setLocation(null);
             router.push('/(tabs)/dashboard');
           },
         },
@@ -183,6 +295,104 @@ export default function ApplyScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.label}>Required Documents</Text>
+          
+          <View style={styles.documentSection}>
+            <Text style={styles.documentLabel}>Your Photo</Text>
+            {userPhoto ? (
+              <View style={styles.imagePreview}>
+                <Image source={{ uri: userPhoto }} style={styles.previewImage} />
+                <TouchableOpacity
+                  style={styles.changeButton}
+                  onPress={() => {
+                    Alert.alert('Choose Action', 'How would you like to add your photo?', [
+                      { text: 'Take Photo', onPress: () => takePhoto('photo') },
+                      { text: 'Choose from Library', onPress: () => pickImage('photo') },
+                      { text: 'Cancel', style: 'cancel' },
+                    ]);
+                  }}
+                >
+                  <Text style={styles.changeButtonText}>Change</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.uploadButton}
+                onPress={() => {
+                  Alert.alert('Choose Action', 'How would you like to add your photo?', [
+                    { text: 'Take Photo', onPress: () => takePhoto('photo') },
+                    { text: 'Choose from Library', onPress: () => pickImage('photo') },
+                    { text: 'Cancel', style: 'cancel' },
+                  ]);
+                }}
+              >
+                <Camera size={24} color="#0891b2" />
+                <Text style={styles.uploadButtonText}>Upload Your Photo</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <View style={styles.documentSection}>
+            <Text style={styles.documentLabel}>National ID</Text>
+            {nationalIdPhoto ? (
+              <View style={styles.imagePreview}>
+                <Image source={{ uri: nationalIdPhoto }} style={styles.previewImage} />
+                <TouchableOpacity
+                  style={styles.changeButton}
+                  onPress={() => {
+                    Alert.alert('Choose Action', 'How would you like to add your ID?', [
+                      { text: 'Take Photo', onPress: () => takePhoto('id') },
+                      { text: 'Choose from Library', onPress: () => pickImage('id') },
+                      { text: 'Cancel', style: 'cancel' },
+                    ]);
+                  }}
+                >
+                  <Text style={styles.changeButtonText}>Change</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.uploadButton}
+                onPress={() => {
+                  Alert.alert('Choose Action', 'How would you like to add your ID?', [
+                    { text: 'Take Photo', onPress: () => takePhoto('id') },
+                    { text: 'Choose from Library', onPress: () => pickImage('id') },
+                    { text: 'Cancel', style: 'cancel' },
+                  ]);
+                }}
+              >
+                <CreditCard size={24} color="#0891b2" />
+                <Text style={styles.uploadButtonText}>Upload National ID</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <View style={styles.documentSection}>
+            <Text style={styles.documentLabel}>Location</Text>
+            {location ? (
+              <View style={styles.locationContainer}>
+                <MapPin size={20} color="#0891b2" />
+                <Text style={styles.locationText}>{location}</Text>
+                <TouchableOpacity
+                  style={styles.locationButton}
+                  onPress={getCurrentLocation}
+                >
+                  <Text style={styles.locationButtonText}>Update</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={styles.uploadButton}
+                onPress={getCurrentLocation}
+              >
+                <MapPin size={24} color="#0891b2" />
+                <Text style={styles.uploadButtonText}>Get Current Location</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 
@@ -409,5 +619,84 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600' as const,
     color: '#fff',
+  },
+  documentSection: {
+    marginBottom: 20,
+  },
+  documentLabel: {
+    fontSize: 14,
+    fontWeight: '500' as const,
+    color: '#64748b',
+    marginBottom: 8,
+  },
+  uploadButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: '#e0f2fe',
+    borderStyle: 'dashed',
+    gap: 12,
+  },
+  uploadButtonText: {
+    fontSize: 16,
+    fontWeight: '500' as const,
+    color: '#0891b2',
+  },
+  imagePreview: {
+    position: 'relative',
+    width: '100%',
+    height: 200,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#f1f5f9',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+    resizeMode: 'cover',
+  },
+  changeButton: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    backgroundColor: '#0891b2',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  changeButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600' as const,
+  },
+  locationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    gap: 8,
+  },
+  locationText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#1e293b',
+  },
+  locationButton: {
+    backgroundColor: '#e0f2fe',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  locationButtonText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: '#0891b2',
   },
 });
