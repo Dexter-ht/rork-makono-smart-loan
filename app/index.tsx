@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
-import { DollarSign, Shield, Zap } from 'lucide-react-native';
+import { Banknote, Shield, Zap, DollarSign } from 'lucide-react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function WelcomeScreen() {
@@ -18,7 +18,7 @@ export default function WelcomeScreen() {
           <View style={styles.content}>
             <View style={styles.header}>
               <View style={styles.iconContainer}>
-                <DollarSign size={48} color="#fff" strokeWidth={2.5} />
+                <Banknote size={48} color="#fff" strokeWidth={2.5} />
               </View>
               <Text style={styles.title}>Makono Smart Loan</Text>
               <Text style={styles.subtitle}>Your trusted financial partner</Text>
