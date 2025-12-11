@@ -244,6 +244,44 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     }
   };
 
+  const createAccount = async (
+    name: string,
+    email: string,
+    phone: string,
+    role: 'admin_viewer' | 'user'
+  ): Promise<{ success: boolean; password?: string; error?: string }> => {
+    try {
+      if (!user || user.role !== 'super_admin') {
+        return { success: false, error: 'Only super admins can create accounts' };
+      }
+
+      const existingUser = users.find(u => u.email === email || u.phone === phone);
+      if (existingUser) {
+        return { success: false, error: 'User with this email or phone already exists' };
+      }
+
+      const tempPassword = Math.random().toString(36).slice(-8);
+      const newUser: User = {
+        id: `${role === 'admin_viewer' ? 'admin' : 'user'}-${Date.now()}`,
+        name,
+        phone,
+        email,
+        password: hashPassword(tempPassword),
+        isAdmin: role === 'admin_viewer',
+        role,
+        invitedBy: user.id,
+        createdAt: new Date().toISOString(),
+      };
+
+      await saveUsers([...users, newUser]);
+      console.log(`Created ${role} account: ${email} with temporary password: ${tempPassword}`);
+      return { success: true, password: tempPassword };
+    } catch (error) {
+      console.error('Failed to create account:', error);
+      return { success: false, error: 'Failed to create account' };
+    }
+  };
+
   const getAllAdmins = (): User[] => {
     return users.filter(u => u.isAdmin && u.role !== 'super_admin');
   };
@@ -260,6 +298,10 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     return user?.role === 'super_admin';
   };
 
+  const isAdminViewer = (): boolean => {
+    return user?.role === 'admin_viewer';
+  };
+
   return {
     user,
     isLoading,
@@ -269,8 +311,10 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     login,
     logout,
     inviteAdmin,
+    createAccount,
     getAllAdmins,
     isSuperAdmin,
+    isAdminViewer,
     canApproveLoans,
     canUploadPayment,
   };

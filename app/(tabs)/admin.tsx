@@ -37,14 +37,18 @@ import * as DocumentPicker from 'expo-document-picker';
 
 export default function AdminScreen() {
   const { loans, getAdminStats, approveLoan, rejectLoan, currentInterestRate, updateInterestRate, requestSecurityDocuments, uploadDocument, getLoanDocuments, getAllLoansForUser } = useLoans();
-  const { isSuperAdmin, canApproveLoans, canUploadPayment, inviteAdmin, getAllAdmins } = useAuth();
+  const { isSuperAdmin, canApproveLoans, canUploadPayment, createAccount, getAllAdmins } = useAuth();
   const stats = getAdminStats();
   const [newRate, setNewRate] = useState<string>(currentInterestRate.toString());
   const [showRateModal, setShowRateModal] = useState<boolean>(false);
   const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
-  const [showInviteModal, setShowInviteModal] = useState<boolean>(false);
-  const [inviteEmail, setInviteEmail] = useState<string>('');
+
   const [showAdminsModal, setShowAdminsModal] = useState<boolean>(false);
+  const [showCreateAccountModal, setShowCreateAccountModal] = useState<boolean>(false);
+  const [accountName, setAccountName] = useState<string>('');
+  const [accountEmail, setAccountEmail] = useState<string>('');
+  const [accountPhone, setAccountPhone] = useState<string>('');
+  const [accountRole, setAccountRole] = useState<'admin_viewer' | 'user'>('user');
 
   const borrowers = useMemo(() => {
     const userIds = new Set(loans.map(l => l.userId));
@@ -172,39 +176,42 @@ export default function AdminScreen() {
     );
   };
 
-  const handleInviteAdmin = async () => {
-    if (!inviteEmail.trim()) {
-      Alert.alert('Error', 'Please enter an email address');
+  const handleCreateAccount = async () => {
+    if (!accountName.trim() || !accountEmail.trim() || !accountPhone.trim()) {
+      Alert.alert('Error', 'Please fill in all fields');
       return;
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(inviteEmail)) {
+    if (!emailRegex.test(accountEmail)) {
       Alert.alert('Error', 'Please enter a valid email address');
       return;
     }
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const result = await inviteAdmin(inviteEmail);
+    const result = await createAccount(accountName, accountEmail, accountPhone, accountRole);
 
     if (result.success) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       Alert.alert(
         'Success',
-        'Admin viewer invited successfully. Check console for temporary password.',
+        `Account created successfully.\nTemporary Password: ${result.password}\n\nPlease save this password, it will not be shown again.`,
         [
           {
             text: 'OK',
             onPress: () => {
-              setShowInviteModal(false);
-              setInviteEmail('');
+              setShowCreateAccountModal(false);
+              setAccountName('');
+              setAccountEmail('');
+              setAccountPhone('');
+              setAccountRole('user');
             },
           },
         ]
       );
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Error', result.error || 'Failed to send invitation');
+      Alert.alert('Error', result.error || 'Failed to create account');
     }
   };
 
@@ -365,7 +372,7 @@ export default function AdminScreen() {
                 <TouchableOpacity
                   style={styles.headerButton}
                   onPress={() => {
-                    setShowInviteModal(true);
+                    setShowCreateAccountModal(true);
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   }}
                 >
@@ -780,37 +787,105 @@ export default function AdminScreen() {
       </ScrollView>
 
       <Modal
-        visible={showInviteModal}
+        visible={showCreateAccountModal}
         transparent
         animationType="fade"
-        onRequestClose={() => setShowInviteModal(false)}
+        onRequestClose={() => setShowCreateAccountModal(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Invite Admin Viewer</Text>
+            <Text style={styles.modalTitle}>Create Account</Text>
             <Text style={styles.modalSubtitle}>
-              They will have view-only access to all loans
+              Create a new user or admin viewer account
             </Text>
+
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.input}
+                placeholder="Full Name"
+                placeholderTextColor="#94a3b8"
+                value={accountName}
+                onChangeText={setAccountName}
+              />
+            </View>
 
             <View style={styles.inputContainer}>
               <Mail size={20} color="#7c3aed" />
               <TextInput
                 style={styles.input}
-                placeholder="Enter email address"
+                placeholder="Email address"
                 placeholderTextColor="#94a3b8"
-                value={inviteEmail}
-                onChangeText={setInviteEmail}
+                value={accountEmail}
+                onChangeText={setAccountEmail}
                 keyboardType="email-address"
                 autoCapitalize="none"
               />
+            </View>
+
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.input}
+                placeholder="Phone number"
+                placeholderTextColor="#94a3b8"
+                value={accountPhone}
+                onChangeText={setAccountPhone}
+                keyboardType="phone-pad"
+              />
+            </View>
+
+            <View style={styles.roleSelector}>
+              <Text style={styles.roleSelectorLabel}>Account Type:</Text>
+              <View style={styles.roleButtons}>
+                <TouchableOpacity
+                  style={[
+                    styles.roleButton,
+                    accountRole === 'user' && styles.roleButtonActive,
+                  ]}
+                  onPress={() => {
+                    setAccountRole('user');
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.roleButtonText,
+                      accountRole === 'user' && styles.roleButtonTextActive,
+                    ]}
+                  >
+                    User
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.roleButton,
+                    accountRole === 'admin_viewer' && styles.roleButtonActive,
+                  ]}
+                  onPress={() => {
+                    setAccountRole('admin_viewer');
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.roleButtonText,
+                      accountRole === 'admin_viewer' && styles.roleButtonTextActive,
+                    ]}
+                  >
+                    Admin Viewer
+                  </Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={styles.modalCancelButton}
                 onPress={() => {
-                  setShowInviteModal(false);
-                  setInviteEmail('');
+                  setShowCreateAccountModal(false);
+                  setAccountName('');
+                  setAccountEmail('');
+                  setAccountPhone('');
+                  setAccountRole('user');
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                 }}
               >
@@ -818,9 +893,9 @@ export default function AdminScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.modalConfirmButton}
-                onPress={handleInviteAdmin}
+                onPress={handleCreateAccount}
               >
-                <Text style={styles.modalConfirmText}>Send Invite</Text>
+                <Text style={styles.modalConfirmText}>Create Account</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1435,6 +1510,40 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600' as const,
     color: '#fff',
+  },
+  roleSelector: {
+    marginBottom: 24,
+  },
+  roleSelectorLabel: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#64748b',
+    marginBottom: 12,
+  },
+  roleButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  roleButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#f1f5f9',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  roleButtonActive: {
+    backgroundColor: '#f3e8ff',
+    borderColor: '#7c3aed',
+  },
+  roleButtonText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#64748b',
+  },
+  roleButtonTextActive: {
+    color: '#7c3aed',
   },
   borrowerCard: {
     backgroundColor: '#fff',
