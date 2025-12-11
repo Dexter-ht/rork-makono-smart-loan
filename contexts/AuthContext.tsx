@@ -52,8 +52,11 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     try {
       const storedUsers = await AsyncStorage.getItem(STORAGE_KEYS.USERS);
       if (storedUsers) {
-        setUsers(JSON.parse(storedUsers));
+        const parsedUsers = JSON.parse(storedUsers);
+        console.log('Loaded users from storage:', parsedUsers.length);
+        setUsers(parsedUsers);
       } else {
+        console.log('No users found, creating default admin');
         const adminUser: User = {
           id: 'admin-1',
           name: 'Admin User',
@@ -108,7 +111,10 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     password: string
   ): Promise<{ success: boolean; userId?: string; error?: string }> => {
     try {
-      const existingUser = users.find(u => u.email === email || u.phone === phone);
+      const storedUsers = await AsyncStorage.getItem(STORAGE_KEYS.USERS);
+      const currentUsers = storedUsers ? JSON.parse(storedUsers) : [];
+      
+      const existingUser = currentUsers.find((u: User) => u.email === email || u.phone === phone);
       if (existingUser) {
         return { success: false, error: 'User already exists with this email or phone' };
       }
@@ -124,7 +130,10 @@ export const [AuthContext, useAuth] = createContextHook(() => {
         createdAt: new Date().toISOString(),
       };
 
-      await saveUsers([...users, newUser]);
+      const updatedUsers = [...currentUsers, newUser];
+      await AsyncStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
+      setUsers(updatedUsers);
+      console.log('User registered successfully:', email);
       return { success: true, userId: newUser.id };
     } catch (error) {
       console.error('Registration error:', error);
@@ -185,16 +194,23 @@ export const [AuthContext, useAuth] = createContextHook(() => {
 
   const login = async (email: string, password: string): Promise<{ success: boolean; userId?: string; error?: string }> => {
     try {
-      const foundUser = users.find(u => u.email === email);
+      const storedUsers = await AsyncStorage.getItem(STORAGE_KEYS.USERS);
+      const currentUsers = storedUsers ? JSON.parse(storedUsers) : [];
+      console.log('Login attempt for:', email, 'Total users:', currentUsers.length);
+      
+      const foundUser = currentUsers.find((u: User) => u.email === email);
 
       if (!foundUser) {
+        console.log('User not found:', email);
         return { success: false, error: 'User not found' };
       }
 
       if (!verifyPassword(password, foundUser.password)) {
+        console.log('Invalid password for:', email);
         return { success: false, error: 'Invalid password' };
       }
 
+      console.log('Login successful for:', email);
       return { success: true, userId: foundUser.id };
     } catch (error) {
       console.error('Login error:', error);
