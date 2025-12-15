@@ -61,7 +61,7 @@ export default function SplashScreen() {
       clearInterval(shuffleInterval);
       clearTimeout(slowDownPhase);
     };
-  }, []);
+  }, [fadeAnim, router, scaleAnim]);
 
   return (
     <View style={styles.container}>

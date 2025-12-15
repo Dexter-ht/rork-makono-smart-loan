@@ -268,7 +268,11 @@ export const [AuthContext, useAuth] = createContextHook(() => {
   ): Promise<{ success: boolean; password?: string; error?: string }> => {
     try {
       if (!user || user.role !== 'super_admin') {
-        return { success: false, error: 'Only super admins can create accounts' };
+        return { success: false, error: 'Only the super administrator can create accounts' };
+      }
+
+      if (role !== 'admin_viewer' && role !== 'user') {
+        return { success: false, error: 'Invalid role. Only admin_viewer and user accounts can be created.' };
       }
 
       const existingUser = users.find(u => u.email === email || u.phone === phone);
@@ -299,7 +303,11 @@ export const [AuthContext, useAuth] = createContextHook(() => {
   };
 
   const getAllAdmins = (): User[] => {
-    return users.filter(u => u.isAdmin && u.role !== 'super_admin');
+    return users.filter(u => u.role === 'admin_viewer');
+  };
+
+  const getSuperAdmin = (): User | undefined => {
+    return users.find(u => u.role === 'super_admin');
   };
 
   const isSuperAdmin = (): boolean => {
@@ -329,6 +337,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     inviteAdmin,
     createAccount,
     getAllAdmins,
+    getSuperAdmin,
     isSuperAdmin,
     isAdminViewer,
     canApproveLoans,
