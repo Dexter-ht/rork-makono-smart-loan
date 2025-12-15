@@ -30,10 +30,13 @@ import {
   Mail,
   ChevronDown,
   ChevronUp,
+  Download,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 
 export default function AdminScreen() {
   const { loans, getAdminStats, approveLoan, rejectLoan, currentInterestRate, updateInterestRate, requestSecurityDocuments, uploadDocument, getLoanDocuments, getAllLoansForUser } = useLoans();
@@ -296,6 +299,288 @@ export default function AdminScreen() {
     }
   };
 
+  const generateBorrowerReport = async () => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      const borrowersData = borrowers.map(borrower => {
+        const totalBorrowed = borrower.totalBorrowed;
+        const loansHtml = borrower.loans.map(loan => `
+          <tr>
+            <td style="padding: 8px; border: 1px solid #e2e8f0;">${loan.loanType}</td>
+            <td style="padding: 8px; border: 1px solid #e2e8f0;">MKW ${loan.amount.toLocaleString()}</td>
+            <td style="padding: 8px; border: 1px solid #e2e8f0;">${loan.status}</td>
+            <td style="padding: 8px; border: 1px solid #e2e8f0;">${new Date(loan.createdAt).toLocaleDateString()}</td>
+            <td style="padding: 8px; border: 1px solid #e2e8f0;">${loan.dueDate ? new Date(loan.dueDate).toLocaleDateString() : 'N/A'}</td>
+          </tr>
+        `).join('');
+
+        return `
+          <div style="margin-bottom: 30px; page-break-inside: avoid;">
+            <h3 style="color: #7c3aed; margin-bottom: 10px;">User ID: ${borrower.userId.substring(0, 30)}...</h3>
+            <p><strong>Total Loans:</strong> ${borrower.totalLoans} | <strong>Active Loans:</strong> ${borrower.activeLoanCount} | <strong>Total Borrowed:</strong> MKW ${totalBorrowed.toLocaleString()}</p>
+            <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+              <thead>
+                <tr style="background-color: #f3e8ff;">
+                  <th style="padding: 8px; border: 1px solid #e2e8f0; text-align: left;">Loan Type</th>
+                  <th style="padding: 8px; border: 1px solid #e2e8f0; text-align: left;">Amount</th>
+                  <th style="padding: 8px; border: 1px solid #e2e8f0; text-align: left;">Status</th>
+                  <th style="padding: 8px; border: 1px solid #e2e8f0; text-align: left;">Applied</th>
+                  <th style="padding: 8px; border: 1px solid #e2e8f0; text-align: left;">Due Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${loansHtml}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }).join('');
+
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Makono Smart Loan - Borrowers Report</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+              padding: 40px;
+              color: #1e293b;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 30px;
+              padding-bottom: 20px;
+              border-bottom: 3px solid #7c3aed;
+            }
+            .header h1 {
+              color: #7c3aed;
+              margin: 0;
+              font-size: 28px;
+            }
+            .header p {
+              color: #64748b;
+              margin: 10px 0 0 0;
+            }
+            .stats {
+              display: flex;
+              justify-content: space-around;
+              margin-bottom: 30px;
+              padding: 20px;
+              background-color: #f8fafc;
+              border-radius: 8px;
+            }
+            .stat-item {
+              text-align: center;
+            }
+            .stat-value {
+              font-size: 24px;
+              font-weight: bold;
+              color: #7c3aed;
+            }
+            .stat-label {
+              font-size: 12px;
+              color: #64748b;
+              margin-top: 5px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Makono Smart Loan</h1>
+            <p>Borrowers Database Report</p>
+            <p style="font-size: 12px;">Generated on ${new Date().toLocaleString()}</p>
+          </div>
+          <div class="stats">
+            <div class="stat-item">
+              <div class="stat-value">${borrowers.length}</div>
+              <div class="stat-label">Total Borrowers</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">${stats.totalLoans}</div>
+              <div class="stat-label">Total Loans</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">${stats.approvedLoans}</div>
+              <div class="stat-label">Approved</div>
+            </div>
+            <div class="stat-item">
+              <div class="stat-value">${stats.pendingLoans}</div>
+              <div class="stat-label">Pending</div>
+            </div>
+          </div>
+          ${borrowersData}
+        </body>
+        </html>
+      `;
+
+      const { uri } = await Print.printToFileAsync({ html });
+      await Sharing.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Share Borrowers Report',
+        UTI: 'com.adobe.pdf',
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      console.error('Failed to generate borrower report:', error);
+      Alert.alert('Error', 'Failed to generate PDF report');
+    }
+  };
+
+  const generateAdminReport = async () => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      const loansHtml = loans.map(loan => `
+        <tr>
+          <td style="padding: 8px; border: 1px solid #e2e8f0; font-size: 11px;">${loan.id.substring(0, 15)}...</td>
+          <td style="padding: 8px; border: 1px solid #e2e8f0;">${loan.loanType}</td>
+          <td style="padding: 8px; border: 1px solid #e2e8f0;">MKW ${loan.amount.toLocaleString()}</td>
+          <td style="padding: 8px; border: 1px solid #e2e8f0;">${loan.repaymentPeriod}m</td>
+          <td style="padding: 8px; border: 1px solid #e2e8f0;">${loan.interestRate}%</td>
+          <td style="padding: 8px; border: 1px solid #e2e8f0;">MKW ${loan.monthlyPayment.toFixed(2)}</td>
+          <td style="padding: 8px; border: 1px solid #e2e8f0;">MKW ${loan.totalPayable.toFixed(2)}</td>
+          <td style="padding: 8px; border: 1px solid #e2e8f0;">
+            <span style="padding: 4px 8px; background-color: ${getStatusBadgeColor(loan.status)}; color: white; border-radius: 4px; font-size: 10px;">${loan.status}</span>
+          </td>
+          <td style="padding: 8px; border: 1px solid #e2e8f0; font-size: 10px;">${new Date(loan.createdAt).toLocaleDateString()}</td>
+        </tr>
+      `).join('');
+
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Makono Smart Loan - Admin Report</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+              padding: 30px;
+              color: #1e293b;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 30px;
+              padding-bottom: 20px;
+              border-bottom: 3px solid #7c3aed;
+            }
+            .header h1 {
+              color: #7c3aed;
+              margin: 0;
+              font-size: 28px;
+            }
+            .header p {
+              color: #64748b;
+              margin: 10px 0 0 0;
+            }
+            .stats {
+              display: grid;
+              grid-template-columns: repeat(5, 1fr);
+              gap: 15px;
+              margin-bottom: 30px;
+            }
+            .stat-card {
+              text-align: center;
+              padding: 15px;
+              background-color: #f8fafc;
+              border-radius: 8px;
+              border: 1px solid #e2e8f0;
+            }
+            .stat-value {
+              font-size: 22px;
+              font-weight: bold;
+              color: #7c3aed;
+            }
+            .stat-label {
+              font-size: 11px;
+              color: #64748b;
+              margin-top: 5px;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 20px;
+            }
+            thead {
+              background-color: #7c3aed;
+              color: white;
+            }
+            th {
+              padding: 10px 8px;
+              text-align: left;
+              font-size: 11px;
+              font-weight: 600;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Makono Smart Loan</h1>
+            <p>Admin Database Report - Full Loan Details</p>
+            <p style="font-size: 12px;">Generated on ${new Date().toLocaleString()}</p>
+            <p style="font-size: 10px; color: #7c3aed; margin-top: 5px;">CONFIDENTIAL - For Administrative Use Only</p>
+          </div>
+          <div class="stats">
+            <div class="stat-card">
+              <div class="stat-value">${stats.totalLoans}</div>
+              <div class="stat-label">Total Loans</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value">${stats.approvedLoans}</div>
+              <div class="stat-label">Approved</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value">${stats.rejectedLoans}</div>
+              <div class="stat-label">Rejected</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value">${stats.pendingLoans}</div>
+              <div class="stat-label">Pending</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value">MKW ${stats.totalRevenue.toLocaleString()}</div>
+              <div class="stat-label">Total Revenue</div>
+            </div>
+          </div>
+          <h3 style="color: #1e293b; margin-top: 30px;">All Loan Applications</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Loan ID</th>
+                <th>Type</th>
+                <th>Amount</th>
+                <th>Period</th>
+                <th>Rate</th>
+                <th>Monthly</th>
+                <th>Total Payable</th>
+                <th>Status</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${loansHtml}
+            </tbody>
+          </table>
+        </body>
+        </html>
+      `;
+
+      const { uri } = await Print.printToFileAsync({ html });
+      await Sharing.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Share Admin Report',
+        UTI: 'com.adobe.pdf',
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      console.error('Failed to generate admin report:', error);
+      Alert.alert('Error', 'Failed to generate PDF report');
+    }
+  };
+
   const handleRequestSecurityMedia = async (loanId: string) => {
     Alert.alert(
       'Request Security Media',
@@ -358,28 +643,30 @@ export default function AdminScreen() {
                 {isSuperAdmin() ? 'Super Admin' : 'Viewer'}
               </Text>
             </View>
-            {isSuperAdmin() && (
-              <View style={styles.headerActions}>
-                <TouchableOpacity
-                  style={styles.headerButton}
-                  onPress={() => {
-                    setShowAdminsModal(true);
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  }}
-                >
-                  <Eye size={20} color="#fff" />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.headerButton}
-                  onPress={() => {
-                    setShowCreateAccountModal(true);
-                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  }}
-                >
-                  <UserPlus size={20} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            )}
+            <View style={styles.headerActions}>
+              {isSuperAdmin() && (
+                <>
+                  <TouchableOpacity
+                    style={styles.headerButton}
+                    onPress={() => {
+                      setShowAdminsModal(true);
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }}
+                  >
+                    <Eye size={20} color="#fff" />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.headerButton}
+                    onPress={() => {
+                      setShowCreateAccountModal(true);
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }}
+                  >
+                    <UserPlus size={20} color="#fff" />
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
           </View>
         </SafeAreaView>
       </LinearGradient>
@@ -388,6 +675,23 @@ export default function AdminScreen() {
         style={styles.content}
         contentContainerStyle={styles.scrollContent}
       >
+        <View style={styles.pdfButtonsRow}>
+          <TouchableOpacity
+            style={styles.pdfButton}
+            onPress={generateBorrowerReport}
+          >
+            <Download size={18} color="#fff" />
+            <Text style={styles.pdfButtonText}>Borrowers Report</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.pdfButton, styles.pdfButtonAdmin]}
+            onPress={generateAdminReport}
+          >
+            <Download size={18} color="#fff" />
+            <Text style={styles.pdfButtonText}>Admin Report</Text>
+          </TouchableOpacity>
+        </View>
+
         <View style={styles.statsGrid}>
           <View style={styles.statCard}>
             <View style={styles.statIcon}>
@@ -1675,5 +1979,28 @@ const styles = StyleSheet.create({
   historyLoanDetailText: {
     fontSize: 11,
     color: '#64748b',
+  },
+  pdfButtonsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 24,
+  },
+  pdfButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#10b981',
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  pdfButtonAdmin: {
+    backgroundColor: '#7c3aed',
+  },
+  pdfButtonText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#fff',
   },
 });
