@@ -95,51 +95,129 @@ export default function ApplyScreen() {
   const getCurrentLocation = async () => {
     try {
       if (Platform.OS === 'web') {
-        if (navigator.geolocation) {
-          navigator.geolocation.getCurrentPosition(
-            (position) => {
-              const locationString = `${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)}`;
-              setLocation(locationString);
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            },
-            (error) => {
-              console.error('Geolocation error:', error);
-              let errorMessage = 'Failed to get location';
-              
-              switch (error.code) {
-                case 1:
-                  errorMessage = 'Location permission denied. Please allow location access in your browser settings.';
-                  break;
-                case 2:
-                  errorMessage = 'Location information is unavailable. Please check your internet connection.';
-                  break;
-                case 3:
-                  errorMessage = 'Location request timed out. Please try again.';
-                  break;
-                default:
-                  errorMessage = error.message || 'Failed to get location';
-              }
-              
-              Alert.alert('Location Error', errorMessage);
-            },
-            {
-              enableHighAccuracy: true,
-              timeout: 10000,
-              maximumAge: 0
-            }
+        if (!navigator.geolocation) {
+          Alert.alert(
+            'Geolocation Not Supported',
+            'Your browser does not support geolocation. Please enter your location manually.',
+            [
+              {
+                text: 'Enter Manually',
+                onPress: () => {
+                  Alert.prompt(
+                    'Enter Location',
+                    'Please enter your location (e.g., City, Country)',
+                    (text) => {
+                      if (text && text.trim()) {
+                        setLocation(text.trim());
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                      }
+                    }
+                  );
+                },
+              },
+              { text: 'Cancel', style: 'cancel' },
+            ]
           );
-        } else {
-          Alert.alert('Error', 'Geolocation is not supported by this browser');
+          return;
         }
+
+        navigator.geolocation.getCurrentPosition(
+          (position) => {
+            console.log('Location obtained successfully:', position.coords);
+            const locationString = `${position.coords.latitude.toFixed(6)}, ${position.coords.longitude.toFixed(6)}`;
+            setLocation(locationString);
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          },
+          (error) => {
+            console.error('Geolocation error code:', error.code, 'message:', error.message);
+            let errorMessage = 'Failed to get location';
+            let showManualOption = false;
+            
+            switch (error.code) {
+              case 1:
+                errorMessage = 'Location permission was denied. Please allow location access in your browser settings or enter manually.';
+                showManualOption = true;
+                break;
+              case 2:
+                errorMessage = 'Location information is unavailable. This might be due to poor GPS signal or disabled location services.';
+                showManualOption = true;
+                break;
+              case 3:
+                errorMessage = 'Location request timed out. Please try again or enter manually.';
+                showManualOption = true;
+                break;
+              default:
+                errorMessage = 'Could not get your location. Please try again or enter manually.';
+                showManualOption = true;
+            }
+            
+            if (showManualOption) {
+              Alert.alert(
+                'Location Error',
+                errorMessage,
+                [
+                  {
+                    text: 'Try Again',
+                    onPress: () => getCurrentLocation(),
+                  },
+                  {
+                    text: 'Enter Manually',
+                    onPress: () => {
+                      Alert.prompt(
+                        'Enter Location',
+                        'Please enter your location (e.g., City, Country)',
+                        (text) => {
+                          if (text && text.trim()) {
+                            setLocation(text.trim());
+                            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                          }
+                        }
+                      );
+                    },
+                  },
+                  { text: 'Cancel', style: 'cancel' },
+                ]
+              );
+            } else {
+              Alert.alert('Location Error', errorMessage);
+            }
+          },
+          {
+            enableHighAccuracy: false,
+            timeout: 15000,
+            maximumAge: 30000
+          }
+        );
       } else {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
-          Alert.alert('Permission Required', 'Location permission is required to proceed');
+          Alert.alert(
+            'Permission Required',
+            'Location permission is required. Please enable it in your device settings.',
+            [
+              {
+                text: 'Enter Manually',
+                onPress: () => {
+                  Alert.prompt(
+                    'Enter Location',
+                    'Please enter your location (e.g., City, Country)',
+                    (text) => {
+                      if (text && text.trim()) {
+                        setLocation(text.trim());
+                        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                      }
+                    }
+                  );
+                },
+              },
+              { text: 'Cancel', style: 'cancel' },
+            ]
+          );
           return;
         }
 
         const currentLocation = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
+          accuracy: Location.Accuracy.Balanced,
         });
         const locationString = `${currentLocation.coords.latitude.toFixed(6)}, ${currentLocation.coords.longitude.toFixed(6)}`;
         setLocation(locationString);
@@ -147,8 +225,33 @@ export default function ApplyScreen() {
       }
     } catch (error: any) {
       console.error('Error getting location:', error);
-      const errorMessage = error?.message || 'Failed to get location. Please try again.';
-      Alert.alert('Location Error', errorMessage);
+      const errorMessage = error?.message || 'Failed to get location. Please try again or enter manually.';
+      Alert.alert(
+        'Location Error',
+        errorMessage,
+        [
+          {
+            text: 'Try Again',
+            onPress: () => getCurrentLocation(),
+          },
+          {
+            text: 'Enter Manually',
+            onPress: () => {
+              Alert.prompt(
+                'Enter Location',
+                'Please enter your location (e.g., City, Country)',
+                (text) => {
+                  if (text && text.trim()) {
+                    setLocation(text.trim());
+                    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                  }
+                }
+              );
+            },
+          },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
     }
   };
 
