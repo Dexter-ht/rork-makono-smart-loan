@@ -107,13 +107,13 @@ export default function ApplyScreen() {
               let errorMessage = 'Failed to get location';
               
               switch (error.code) {
-                case error.PERMISSION_DENIED:
+                case 1:
                   errorMessage = 'Location permission denied. Please allow location access in your browser settings.';
                   break;
-                case error.POSITION_UNAVAILABLE:
+                case 2:
                   errorMessage = 'Location information is unavailable. Please check your internet connection.';
                   break;
-                case error.TIMEOUT:
+                case 3:
                   errorMessage = 'Location request timed out. Please try again.';
                   break;
                 default:
