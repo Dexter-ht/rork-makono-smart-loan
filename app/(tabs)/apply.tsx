@@ -103,8 +103,29 @@ export default function ApplyScreen() {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             },
             (error) => {
-              console.error('Error getting location:', error);
-              Alert.alert('Error', 'Failed to get location');
+              console.error('Geolocation error:', error);
+              let errorMessage = 'Failed to get location';
+              
+              switch (error.code) {
+                case error.PERMISSION_DENIED:
+                  errorMessage = 'Location permission denied. Please allow location access in your browser settings.';
+                  break;
+                case error.POSITION_UNAVAILABLE:
+                  errorMessage = 'Location information is unavailable. Please check your internet connection.';
+                  break;
+                case error.TIMEOUT:
+                  errorMessage = 'Location request timed out. Please try again.';
+                  break;
+                default:
+                  errorMessage = error.message || 'Failed to get location';
+              }
+              
+              Alert.alert('Location Error', errorMessage);
+            },
+            {
+              enableHighAccuracy: true,
+              timeout: 10000,
+              maximumAge: 0
             }
           );
         } else {
@@ -113,18 +134,21 @@ export default function ApplyScreen() {
       } else {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') {
-          Alert.alert('Permission Required', 'Location permission is required');
+          Alert.alert('Permission Required', 'Location permission is required to proceed');
           return;
         }
 
-        const currentLocation = await Location.getCurrentPositionAsync({});
+        const currentLocation = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
+        });
         const locationString = `${currentLocation.coords.latitude.toFixed(6)}, ${currentLocation.coords.longitude.toFixed(6)}`;
         setLocation(locationString);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error getting location:', error);
-      Alert.alert('Error', 'Failed to get location');
+      const errorMessage = error?.message || 'Failed to get location. Please try again.';
+      Alert.alert('Location Error', errorMessage);
     }
   };
 
