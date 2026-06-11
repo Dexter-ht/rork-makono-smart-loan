@@ -31,6 +31,8 @@ import {
   ChevronDown,
   ChevronUp,
   Download,
+  Calendar,
+  ReceiptText,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
@@ -39,7 +41,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 export default function AdminScreen() {
-  const { loans, getAdminStats, approveLoan, rejectLoan, currentInterestRate, updateInterestRate, requestSecurityDocuments, uploadDocument, getLoanDocuments, getAllLoansForUser } = useLoans();
+  const { loans, getAdminStats, approveLoan, rejectLoan, currentInterestRate, updateInterestRate, requestSecurityDocuments, uploadDocument, getLoanDocuments, getAllLoansForUser, getLoanPayments, getLoanRollover, payments, rollovers } = useLoans();
   const { isSuperAdmin, canApproveLoans, canUploadPayment, createAccount, getAllAdmins } = useAuth();
   const stats = getAdminStats();
   const [newRate, setNewRate] = useState<string>(currentInterestRate.toString());
@@ -581,6 +583,330 @@ export default function AdminScreen() {
     }
   };
 
+  const generateStatementOfAccount = async () => {
+    try {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+      let totalPrincipal = 0;
+      let totalInterest = 0;
+      let totalPaid = 0;
+      let totalOutstanding = 0;
+      let totalPenalties = 0;
+      let totalRolloverAmount = 0;
+      let activeLoanCount = 0;
+      let overdueLoanCount = 0;
+
+      const loansHtmlContent = loans
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+        .map(loan => {
+          const loanPayments = getLoanPayments(loan.id);
+          const rollover = getLoanRollover(loan.id);
+          const totalPaidForLoan = loanPayments.reduce((sum, p) => sum + p.amount, 0);
+          const principal = loan.amount;
+          const interest = loan.totalPayable - principal;
+          const outstanding = Math.max(0, loan.totalPayable - totalPaidForLoan);
+          const penalty = loan.latePaymentPenalty || 0;
+
+          totalPrincipal += principal;
+          totalInterest += interest;
+          totalPaid += totalPaidForLoan;
+          totalOutstanding += outstanding;
+          totalPenalties += penalty;
+          if (rollover) totalRolloverAmount += rollover.rolloverTotalPayable;
+
+          if (loan.status === 'active' || loan.status === 'disbursed') activeLoanCount++;
+          if (loan.status === 'overdue') overdueLoanCount++;
+
+          const paymentsRows = loanPayments.length > 0
+            ? loanPayments.map(p => `
+              <tr>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-size: 10px;">${p.id.substring(0, 12)}...</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-size: 10px;">MKW ${p.amount.toLocaleString()}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-size: 10px;">${p.isPartial ? 'Partial' : 'Full'}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-size: 10px;">MKW ${p.remainingAfter.toLocaleString()}</td>
+                <td style="padding: 6px 8px; border: 1px solid #e2e8f0; font-size: 10px;">${new Date(p.paidAt).toLocaleDateString()}</td>
+              </tr>
+            `).join('')
+            : '<tr><td colspan="5" style="padding: 8px; text-align: center; color: #94a3b8; font-size: 11px;">No payments recorded</td></tr>';
+
+          const rolloverHtmlBlock = rollover
+            ? `<div style="margin-top: 10px; padding: 10px; background-color: #fef3c7; border-radius: 6px; border-left: 4px solid #f59e0b;">
+              <strong style="font-size: 12px;">Roll-over Created:</strong>
+              <table style="width: 100%; margin-top: 6px; font-size: 10px;">
+                <tr><td style="padding: 3px;">Original Amount:</td><td style="padding: 3px; font-weight: 600;">MKW ${rollover.originalAmount.toLocaleString()}</td></tr>
+                <tr><td style="padding: 3px;">Amount Paid:</td><td style="padding: 3px; font-weight: 600;">MKW ${rollover.paidAmount.toLocaleString()}</td></tr>
+                <tr><td style="padding: 3px;">Remaining Principal:</td><td style="padding: 3px; font-weight: 600;">MKW ${rollover.remainingPrincipal.toLocaleString()}</td></tr>
+                <tr><td style="padding: 3px;">Roll-over Interest:</td><td style="padding: 3px; font-weight: 600;">MKW ${rollover.rolloverInterest.toLocaleString()}</td></tr>
+                <tr><td style="padding: 3px;">New Total Payable:</td><td style="padding: 3px; font-weight: 600; color: #f59e0b;">MKW ${rollover.rolloverTotalPayable.toLocaleString()}</td></tr>
+                <tr><td style="padding: 3px;">New Loan ID:</td><td style="padding: 3px; font-weight: 600;">${rollover.rolloverLoanId}</td></tr>
+              </table>
+            </div>`
+            : '';
+
+          return `
+            <div style="margin-bottom: 24px; padding: 20px; background-color: #fff; border-radius: 8px; border: 1px solid #e2e8f0; page-break-inside: avoid;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+                <div>
+                  <h3 style="margin: 0; color: #1e293b; font-size: 15px;">${loan.loanType} - ${loan.purpose}</h3>
+                  <p style="margin: 4px 0 0; color: #64748b; font-size: 11px;">Loan ID: ${loan.id} | User: ${loan.userId.substring(0, 24)}...</p>
+                </div>
+                <span style="padding: 4px 12px; background-color: ${getStatusBadgeColor(loan.status)}; color: white; border-radius: 12px; font-size: 10px; font-weight: 600; text-transform: capitalize;">${loan.status}</span>
+              </div>
+
+              <table style="width: 100%; margin-bottom: 10px; font-size: 11px;">
+                <tr>
+                  <td style="padding: 4px; color: #64748b;">Principal:</td>
+                  <td style="padding: 4px; font-weight: 600;">MKW ${principal.toLocaleString()}</td>
+                  <td style="padding: 4px; color: #64748b;">Interest Rate:</td>
+                  <td style="padding: 4px; font-weight: 600;">${loan.interestRate}% monthly</td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px; color: #64748b;">Total Interest:</td>
+                  <td style="padding: 4px; font-weight: 600;">MKW ${interest.toLocaleString()}</td>
+                  <td style="padding: 4px; color: #64748b;">Period:</td>
+                  <td style="padding: 4px; font-weight: 600;">${loan.repaymentPeriod} months</td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px; color: #64748b;">Total Payable:</td>
+                  <td style="padding: 4px; font-weight: 600;">MKW ${loan.totalPayable.toLocaleString()}</td>
+                  <td style="padding: 4px; color: #64748b;">Monthly:</td>
+                  <td style="padding: 4px; font-weight: 600;">MKW ${loan.monthlyPayment.toFixed(2)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 4px; color: #64748b;">Total Paid:</td>
+                  <td style="padding: 4px; font-weight: 600; color: #10b981;">MKW ${totalPaidForLoan.toLocaleString()}</td>
+                  <td style="padding: 4px; color: #64748b;">Outstanding:</td>
+                  <td style="padding: 4px; font-weight: 600; color: ${outstanding > 0 ? '#ef4444' : '#10b981'};">MKW ${outstanding.toLocaleString()}</td>
+                </tr>
+                ${penalty > 0 ? `<tr>
+                  <td style="padding: 4px; color: #64748b;">Late Penalty:</td>
+                  <td style="padding: 4px; font-weight: 600; color: #ef4444;">MKW ${penalty.toLocaleString()}</td>
+                  <td></td><td></td>
+                </tr>` : ''}
+                <tr>
+                  <td style="padding: 4px; color: #64748b;">Applied:</td>
+                  <td style="padding: 4px; font-size: 10px;">${new Date(loan.createdAt).toLocaleDateString()}</td>
+                  <td style="padding: 4px; color: #64748b;">Due:</td>
+                  <td style="padding: 4px; font-size: 10px;">${loan.dueDate ? new Date(loan.dueDate).toLocaleDateString() : 'N/A'}</td>
+                </tr>
+              </table>
+
+              ${paymentsRows.length > 0 ? `
+                <h4 style="font-size: 12px; color: #1e293b; margin: 10px 0 6px;">Payment History</h4>
+                <table style="width: 100%; border-collapse: collapse; font-size: 10px;">
+                  <thead>
+                    <tr style="background-color: #f1f5f9;">
+                      <th style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: left;">Payment ID</th>
+                      <th style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: left;">Amount</th>
+                      <th style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: left;">Type</th>
+                      <th style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: left;">Remaining</th>
+                      <th style="padding: 6px 8px; border: 1px solid #e2e8f0; text-align: left;">Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${paymentsRows}
+                  </tbody>
+                </table>
+              ` : ''}
+
+              ${rolloverHtmlBlock}
+            </div>
+          `;
+        }).join('');
+
+      const totalRevenue = totalInterest + totalPenalties + totalRolloverAmount;
+
+      const html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Makono Smart Loan - Statement of Account</title>
+          <style>
+            body {
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+              padding: 30px;
+              color: #1e293b;
+              background-color: #f8fafc;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 24px;
+              padding: 24px;
+              background-color: #fff;
+              border-radius: 12px;
+              border: 1px solid #e2e8f0;
+            }
+            .header h1 {
+              color: #7c3aed;
+              margin: 0;
+              font-size: 26px;
+            }
+            .header p {
+              color: #64748b;
+              margin: 6px 0 0 0;
+            }
+            .header .confidential {
+              font-size: 10px;
+              color: #7c3aed;
+              margin-top: 8px;
+              font-weight: 600;
+              text-transform: uppercase;
+              letter-spacing: 1px;
+            }
+            .summary-grid {
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              gap: 12px;
+              margin-bottom: 24px;
+            }
+            .summary-card {
+              text-align: center;
+              padding: 16px 12px;
+              background-color: #fff;
+              border-radius: 10px;
+              border: 1px solid #e2e8f0;
+            }
+            .summary-value {
+              font-size: 20px;
+              font-weight: bold;
+              color: #7c3aed;
+            }
+            .summary-value.green { color: #10b981; }
+            .summary-value.red { color: #ef4444; }
+            .summary-value.amber { color: #f59e0b; }
+            .summary-label {
+              font-size: 10px;
+              color: #64748b;
+              margin-top: 4px;
+            }
+            .grand-total {
+              background: linear-gradient(135deg, #7c3aed, #8b5cf6);
+              color: white;
+              padding: 20px;
+              border-radius: 12px;
+              margin-bottom: 24px;
+              display: grid;
+              grid-template-columns: repeat(4, 1fr);
+              gap: 12px;
+              text-align: center;
+            }
+            .grand-item {
+              padding: 4px;
+            }
+            .grand-value {
+              font-size: 22px;
+              font-weight: bold;
+            }
+            .grand-label {
+              font-size: 10px;
+              opacity: 0.85;
+              margin-top: 4px;
+            }
+            .footer {
+              text-align: center;
+              padding-top: 20px;
+              border-top: 2px solid #e2e8f0;
+              margin-top: 20px;
+              font-size: 10px;
+              color: #94a3b8;
+            }
+            @page {
+              margin: 20px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>Makono Smart Loan</h1>
+            <p>Statement of Account - All Loans</p>
+            <p style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Generated on ${new Date().toLocaleString()} | Current Interest Rate: ${currentInterestRate}% monthly</p>
+            <p class="confidential">Confidential - For Administrative Use Only</p>
+          </div>
+
+          <div class="summary-grid">
+            <div class="summary-card">
+              <div class="summary-value">${loans.length}</div>
+              <div class="summary-label">Total Loans</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-value">${activeLoanCount}</div>
+              <div class="summary-label">Active Loans</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-value red">${overdueLoanCount}</div>
+              <div class="summary-label">Overdue</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-value">${borrowers.length}</div>
+              <div class="summary-label">Borrowers</div>
+            </div>
+          </div>
+
+          <div class="grand-total">
+            <div class="grand-item">
+              <div class="grand-value">MKW ${totalPrincipal.toLocaleString()}</div>
+              <div class="grand-label">Total Principal Lent</div>
+            </div>
+            <div class="grand-item">
+              <div class="grand-value">MKW ${totalInterest.toLocaleString()}</div>
+              <div class="grand-label">Total Interest Earned</div>
+            </div>
+            <div class="grand-item">
+              <div class="grand-value">MKW ${totalPaid.toLocaleString()}</div>
+              <div class="grand-label">Total Payments Received</div>
+            </div>
+            <div class="grand-item">
+              <div class="grand-value">MKW ${totalOutstanding.toLocaleString()}</div>
+              <div class="grand-label">Total Outstanding</div>
+            </div>
+          </div>
+
+          <h2 style="font-size: 18px; color: #1e293b; margin-bottom: 16px;">Loan Details & Payment History</h2>
+
+          ${loansHtmlContent || '<p style="color: #94a3b8; text-align: center; padding: 40px;">No loans recorded yet.</p>'}
+
+          <div class="grand-total" style="margin-top: 24px;">
+            <div class="grand-item">
+              <div class="grand-value">MKW ${totalPenalties.toLocaleString()}</div>
+              <div class="grand-label">Total Penalties</div>
+            </div>
+            <div class="grand-item">
+              <div class="grand-value">MKW ${totalRolloverAmount.toLocaleString()}</div>
+              <div class="grand-label">Roll-over Amounts</div>
+            </div>
+            <div class="grand-item">
+              <div class="grand-value">MKW ${totalRevenue.toLocaleString()}</div>
+              <div class="grand-label">Gross Revenue</div>
+            </div>
+            <div class="grand-item">
+              <div class="grand-value">${rollovers.length}</div>
+              <div class="grand-label">Roll-overs</div>
+            </div>
+          </div>
+
+          <div class="footer">
+            <p>This is a computer-generated statement of account issued by Makono Smart Loan.</p>
+            <p>All amounts are in Malawian Kwacha (MKW). For any discrepancies, please contact the Super Administrator.</p>
+            <p style="margin-top: 8px;">Generated on ${new Date().toLocaleString()}</p>
+          </div>
+        </body>
+        </html>
+      `;
+
+      const { uri } = await Print.printToFileAsync({ html });
+      await Sharing.shareAsync(uri, {
+        mimeType: 'application/pdf',
+        dialogTitle: 'Share Statement of Account',
+        UTI: 'com.adobe.pdf',
+      });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      console.error('Failed to generate statement of account:', error);
+      Alert.alert('Error', 'Failed to generate Statement of Account PDF');
+    }
+  };
+
   const handleRequestSecurityMedia = async (loanId: string) => {
     Alert.alert(
       'Request Security Media',
@@ -680,15 +1006,22 @@ export default function AdminScreen() {
             style={styles.pdfButton}
             onPress={generateBorrowerReport}
           >
-            <Download size={18} color="#fff" />
-            <Text style={styles.pdfButtonText}>Borrowers Report</Text>
+            <Download size={16} color="#fff" />
+            <Text style={styles.pdfButtonText}>Borrowers</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.pdfButton, styles.pdfButtonAdmin]}
             onPress={generateAdminReport}
           >
-            <Download size={18} color="#fff" />
-            <Text style={styles.pdfButtonText}>Admin Report</Text>
+            <Download size={16} color="#fff" />
+            <Text style={styles.pdfButtonText}>Admin</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.pdfButton, styles.pdfButtonStatement]}
+            onPress={generateStatementOfAccount}
+          >
+            <ReceiptText size={16} color="#fff" />
+            <Text style={styles.pdfButtonText}>Statement</Text>
           </TouchableOpacity>
         </View>
 
@@ -1997,6 +2330,9 @@ const styles = StyleSheet.create({
   },
   pdfButtonAdmin: {
     backgroundColor: '#7c3aed',
+  },
+  pdfButtonStatement: {
+    backgroundColor: '#0891b2',
   },
   pdfButtonText: {
     fontSize: 14,
