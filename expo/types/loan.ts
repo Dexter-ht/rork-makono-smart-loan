@@ -1,3 +1,9 @@
+export interface NotificationPreferences {
+  email: boolean;
+  sms: boolean;
+  whatsapp: boolean;
+}
+
 export interface User {
   id: string;
   name: string;
@@ -8,6 +14,7 @@ export interface User {
   role?: 'super_admin' | 'admin_viewer' | 'user';
   invitedBy?: string;
   createdAt: string;
+  notificationPreferences?: NotificationPreferences;
 }
 
 export interface OTP {

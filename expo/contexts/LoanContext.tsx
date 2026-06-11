@@ -4,6 +4,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LoanApplication, Document, LoanCalculation, AmortizationEntry, RepaymentSchedule, Notification, PaymentRecord, RolloverLoan } from '@/types/loan';
 import { DEFAULT_INTEREST_RATE } from '@/constants/loanTypes';
 import { useAuth } from './AuthContext';
+import {
+  sendToAllUserChannels,
+  buildDueDateReminderMessage,
+  buildOverdueMessage,
+  buildApprovalMessage,
+  buildDisbursementMessage,
+  buildRateChangeMessage,
+  buildRolloverMessage,
+  buildAdjustmentMessage,
+} from '@/services/NotificationService';
 
 const STORAGE_KEYS = {
   LOANS: 'makono_loans',
@@ -16,7 +26,7 @@ const STORAGE_KEYS = {
 } as const;
 
 export const [LoanContext, useLoans] = createContextHook(() => {
-  const { user } = useAuth();
+  const { user, getUserById, getAllUsers } = useAuth();
   const [loans, setLoans] = useState<LoanApplication[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [schedules, setSchedules] = useState<RepaymentSchedule[]>([]);
@@ -172,6 +182,21 @@ export const [LoanContext, useLoans] = createContextHook(() => {
             `Your loan payment is overdue. A 2% penalty (MKW ${penalty.toFixed(2)}) has been added to your total payable amount.`,
             loan.id
           );
+
+          // Send external notifications (email/SMS/WhatsApp)
+          const overdueUser = getUserById(loan.userId);
+          if (overdueUser) {
+            const { subject, message } = buildOverdueMessage(
+              overdueUser.name,
+              loan.loanType,
+              loan.amount,
+              loan.totalPayable,
+              penalty,
+              loan.dueDate!,
+              loan.id
+            );
+            await sendToAllUserChannels(overdueUser, subject, message, loan.id);
+          }
         }
       }
     }
@@ -208,6 +233,21 @@ export const [LoanContext, useLoans] = createContextHook(() => {
             `Your loan payment is due in 7 days. Please prepare MKW ${loan.totalPayable.toFixed(2)} for repayment.`,
             loan.id
           );
+
+          // Send external reminders
+          const reminderUser = getUserById(loan.userId);
+          if (reminderUser) {
+            const { subject, message } = buildDueDateReminderMessage(
+              reminderUser.name,
+              loan.loanType,
+              loan.amount,
+              loan.totalPayable,
+              loan.dueDate!,
+              7,
+              loan.id
+            );
+            await sendToAllUserChannels(reminderUser, subject, message, loan.id);
+          }
         } else if (daysUntilDue === 3 && remindersSent < 2) {
           updatedLoans[i] = {
             ...loan,
@@ -222,6 +262,21 @@ export const [LoanContext, useLoans] = createContextHook(() => {
             `Your loan payment is due in 3 days. Please ensure you have MKW ${loan.totalPayable.toFixed(2)} ready.`,
             loan.id
           );
+
+          // Send external reminders (3-day)
+          const reminderUser3 = getUserById(loan.userId);
+          if (reminderUser3) {
+            const { subject, message } = buildDueDateReminderMessage(
+              reminderUser3.name,
+              loan.loanType,
+              loan.amount,
+              loan.totalPayable,
+              loan.dueDate!,
+              3,
+              loan.id
+            );
+            await sendToAllUserChannels(reminderUser3, subject, message, loan.id);
+          }
         }
       }
     }
@@ -378,6 +433,23 @@ export const [LoanContext, useLoans] = createContextHook(() => {
       );
       await AsyncStorage.setItem(STORAGE_KEYS.LOANS, JSON.stringify(updatedLoans));
       setLoans(updatedLoans);
+
+      // Send external notification (email/SMS/WhatsApp)
+      const approvedLoan = loans.find(l => l.id === loanId);
+      const approvedUser = approvedLoan ? getUserById(approvedLoan.userId) : undefined;
+      if (approvedUser && approvedLoan) {
+        const { subject, message } = buildApprovalMessage(
+          approvedUser.name,
+          approvedLoan.loanType,
+          approvedLoan.amount,
+          approvedLoan.totalPayable,
+          approvedLoan.repaymentPeriod,
+          approvedLoan.interestRate,
+          loanId
+        );
+        await sendToAllUserChannels(approvedUser, subject, message, loanId);
+      }
+
       return { success: true };
     } catch (error) {
       console.error('Failed to approve loan:', error);
@@ -394,6 +466,20 @@ export const [LoanContext, useLoans] = createContextHook(() => {
       );
       await AsyncStorage.setItem(STORAGE_KEYS.LOANS, JSON.stringify(updatedLoans));
       setLoans(updatedLoans);
+
+      // Send external rejection notification
+      const rejectedLoan = loans.find(l => l.id === loanId);
+      const rejectedUser = rejectedLoan ? getUserById(rejectedLoan.userId) : undefined;
+      if (rejectedUser && rejectedLoan) {
+        const { subject, message } = buildAdjustmentMessage(
+          rejectedUser.name,
+          'Loan Rejection',
+          `Your ${rejectedLoan.loanType} loan application for MKW ${rejectedLoan.amount.toLocaleString()} has been rejected. Contact Makono support for details.`,
+          loanId
+        );
+        await sendToAllUserChannels(rejectedUser, subject, message, loanId);
+      }
+
       return { success: true };
     } catch (error) {
       console.error('Failed to reject loan:', error);
@@ -440,6 +526,21 @@ export const [LoanContext, useLoans] = createContextHook(() => {
       }
       await AsyncStorage.setItem(STORAGE_KEYS.INTEREST_RATE, newRate.toString());
       setCurrentInterestRate(newRate);
+
+      // Notify all borrowers about rate change
+      const allUsers = getAllUsers();
+      const borrowerIds = new Set(loans.map(l => l.userId));
+      for (const borrowerUser of allUsers) {
+        if (borrowerIds.has(borrowerUser.id)) {
+          const { subject, message } = buildRateChangeMessage(
+            borrowerUser.name,
+            currentInterestRate,
+            newRate
+          );
+          await sendToAllUserChannels(borrowerUser, subject, message);
+        }
+      }
+
       return { success: true };
     } catch (error) {
       console.error('Failed to update interest rate:', error);
@@ -496,6 +597,20 @@ export const [LoanContext, useLoans] = createContextHook(() => {
         `Your loan of MKW ${loan.amount.toLocaleString()} has been disbursed. Total repayment: MKW ${loan.totalPayable.toFixed(2)} due on ${dueDate.toLocaleDateString()}.`,
         loanId
       );
+
+      // Send external notification (email/SMS/WhatsApp)
+      const disbursedUser = getUserById(loan.userId);
+      if (disbursedUser) {
+        const { subject, message } = buildDisbursementMessage(
+          disbursedUser.name,
+          loan.loanType,
+          loan.amount,
+          loan.totalPayable,
+          dueDate.toISOString(),
+          loanId
+        );
+        await sendToAllUserChannels(disbursedUser, subject, message, loanId);
+      }
 
       return { success: true };
     } catch (error) {
@@ -656,6 +771,22 @@ export const [LoanContext, useLoans] = createContextHook(() => {
             `Your partial payment of MKW ${amount.toLocaleString()} was received. Remaining balance of MKW ${remainingPrincipal.toLocaleString()} has been rolled over. New total payable: MKW ${rolloverTotalPayable.toFixed(2)} (${rolloverPeriod} months at ${loan.interestRate}% monthly).`,
             rolloverLoan.rolloverLoanId
           );
+
+          // Send external rollover notification
+          const rolloverUser = getUserById(loan.userId);
+          if (rolloverUser) {
+            const { subject, message } = buildRolloverMessage(
+              rolloverUser.name,
+              loan.amount,
+              totalPaidSoFar,
+              remainingPrincipal,
+              rolloverTotalPayable,
+              rolloverPeriod,
+              loan.interestRate,
+              rolloverLoan.rolloverLoanId
+            );
+            await sendToAllUserChannels(rolloverUser, subject, message, rolloverLoan.rolloverLoanId);
+          }
         }
       } else {
         updatedLoans = updatedLoans.map(l =>

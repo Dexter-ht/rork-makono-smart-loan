@@ -1,7 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
 import { useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { User, OTP } from '@/types/loan';
+import { User, OTP, NotificationPreferences } from '@/types/loan';
 
 const STORAGE_KEYS = {
   USER: 'makono_user',
@@ -319,6 +319,34 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     return users.filter(u => u.role === 'admin_viewer');
   };
 
+  const getAllUsers = (): User[] => {
+    return users;
+  };
+
+  const getUserById = (userId: string): User | undefined => {
+    return users.find(u => u.id === userId);
+  };
+
+  const updateNotificationPreferences = async (userId: string, prefs: NotificationPreferences): Promise<boolean> => {
+    try {
+      const updatedUsers = users.map(u =>
+        u.id === userId
+          ? { ...u, notificationPreferences: prefs }
+          : u
+      );
+      await saveUsers(updatedUsers);
+      if (user?.id === userId) {
+        const updatedUser = { ...user, notificationPreferences: prefs };
+        await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(updatedUser));
+        setUser(updatedUser);
+      }
+      return true;
+    } catch (error) {
+      console.error('Failed to update notification preferences:', error);
+      return false;
+    }
+  };
+
   const getSuperAdmin = (): User | undefined => {
     return users.find(u => u.role === 'super_admin');
   };
@@ -349,7 +377,10 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     logout,
     inviteAdmin,
     createAccount,
+    getAllUsers,
+    getUserById,
     getAllAdmins,
+    updateNotificationPreferences,
     getSuperAdmin,
     isSuperAdmin,
     isAdminViewer,

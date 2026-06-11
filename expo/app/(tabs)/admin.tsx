@@ -13,6 +13,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLoans } from '@/contexts/LoanContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { User } from '@/types/loan';
 import {
   CheckCircle,
   XCircle,
@@ -33,20 +34,33 @@ import {
   Download,
   Calendar,
   ReceiptText,
+  Bell,
+  BellOff,
+  Smartphone,
+  MessageCircle,
+  Send,
 } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { sendExternalNotification, isWhatsAppAvailable } from '@/services/NotificationService';
 
 export default function AdminScreen() {
   const { loans, getAdminStats, approveLoan, rejectLoan, currentInterestRate, updateInterestRate, requestSecurityDocuments, uploadDocument, getLoanDocuments, getAllLoansForUser, getLoanPayments, getLoanRollover, payments, rollovers } = useLoans();
-  const { isSuperAdmin, canApproveLoans, canUploadPayment, createAccount, getAllAdmins } = useAuth();
+  const { isSuperAdmin, canApproveLoans, canUploadPayment, createAccount, getAllAdmins, user } = useAuth();
   const stats = getAdminStats();
   const [newRate, setNewRate] = useState<string>(currentInterestRate.toString());
   const [showRateModal, setShowRateModal] = useState<boolean>(false);
   const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
+
+  // Notification settings state
+  const [emailEnabled, setEmailEnabled] = useState<boolean>(true);
+  const [smsEnabled, setSmsEnabled] = useState<boolean>(true);
+  const [whatsappEnabled, setWhatsappEnabled] = useState<boolean>(true);
+  const [showNotifSettings, setShowNotifSettings] = useState<boolean>(false);
+  const [testNumber, setTestNumber] = useState<string>('');
 
   const [showAdminsModal, setShowAdminsModal] = useState<boolean>(false);
   const [showCreateAccountModal, setShowCreateAccountModal] = useState<boolean>(false);
@@ -907,6 +921,51 @@ export default function AdminScreen() {
     }
   };
 
+  const handleTestNotification = async (channel: 'email' | 'sms' | 'whatsapp') => {
+    if (!user) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+
+    const to = channel === 'email' ? user.email : testNumber || user.phone;
+    if (!to) {
+      Alert.alert('Error', `No ${channel === 'email' ? 'email' : 'phone number'} available`);
+      return;
+    }
+
+    const result = await sendExternalNotification({
+      to,
+      channel,
+      subject: 'Makono Smart Loan - Test Notification',
+      message: `Hello ${user.name}, this is a test ${channel} notification from Makono.`,
+      recipientName: user.name,
+    });
+
+    if (result.success) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Alert.alert('Success', `Test ${channel} sent to ${to}`);
+    } else {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Error', result.error || `Failed to send ${channel}`);
+    }
+  };
+
+  const handleSendBulkReminders = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    Alert.alert(
+      'Send Bulk Reminders',
+      'This will send payment reminders to all active borrowers via their enabled channels.',
+      [
+        { text: 'Cancel', style: 'cancel' as const },
+        {
+          text: 'Send All',
+          onPress: () => {
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            Alert.alert('Done', 'Reminders are being sent to all active borrowers.');
+          },
+        },
+      ]
+    );
+  };
+
   const handleRequestSecurityMedia = async (loanId: string) => {
     Alert.alert(
       'Request Security Media',
@@ -1134,6 +1193,144 @@ export default function AdminScreen() {
                 <Text style={styles.viewOnlyText}>View Only</Text>
               </View>
             )
+          )}
+        </View>
+
+        {/* Notification Settings Section */}
+        <View style={styles.settingsCard}>
+          <TouchableOpacity
+            style={styles.settingsHeader}
+            onPress={() => {
+              setShowNotifSettings(!showNotifSettings);
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            }}
+          >
+            <Bell size={24} color="#7c3aed" />
+            <Text style={styles.settingsTitle}>Notification Channels</Text>
+            {showNotifSettings ? (
+              <ChevronUp size={20} color="#7c3aed" />
+            ) : (
+              <ChevronDown size={20} color="#7c3aed" />
+            )}
+          </TouchableOpacity>
+
+          {showNotifSettings && (
+            <View style={styles.notifSettingsContent}>
+              <Text style={styles.notifSettingsDesc}>
+                Configure how customers receive automatic reminders and adjustment notifications.
+              </Text>
+
+              {/* Email Toggle */}
+              <View style={styles.notifChannelRow}>
+                <View style={styles.notifChannelInfo}>
+                  <Mail size={20} color="#7c3aed" />
+                  <View style={styles.notifChannelText}>
+                    <Text style={styles.notifChannelLabel}>Email</Text>
+                    <Text style={styles.notifChannelDesc}>Send reminders to borrower email addresses</Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[styles.toggleButton, emailEnabled && styles.toggleButtonActive]}
+                  onPress={() => {
+                    setEmailEnabled(!emailEnabled);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                >
+                  <Text style={[styles.toggleText, emailEnabled && styles.toggleTextActive]}>
+                    {emailEnabled ? 'ON' : 'OFF'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* SMS Toggle */}
+              <View style={styles.notifChannelRow}>
+                <View style={styles.notifChannelInfo}>
+                  <Smartphone size={20} color="#0891b2" />
+                  <View style={styles.notifChannelText}>
+                    <Text style={styles.notifChannelLabel}>SMS</Text>
+                    <Text style={styles.notifChannelDesc}>Send text message reminders to borrower phones</Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[styles.toggleButton, smsEnabled && styles.toggleButtonActive]}
+                  onPress={() => {
+                    setSmsEnabled(!smsEnabled);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                >
+                  <Text style={[styles.toggleText, smsEnabled && styles.toggleTextActive]}>
+                    {smsEnabled ? 'ON' : 'OFF'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* WhatsApp Toggle */}
+              <View style={styles.notifChannelRow}>
+                <View style={styles.notifChannelInfo}>
+                  <MessageCircle size={20} color="#10b981" />
+                  <View style={styles.notifChannelText}>
+                    <Text style={styles.notifChannelLabel}>WhatsApp</Text>
+                    <Text style={styles.notifChannelDesc}>Send WhatsApp message reminders (opens WhatsApp)</Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[styles.toggleButton, whatsappEnabled && styles.toggleButtonActive]}
+                  onPress={() => {
+                    setWhatsappEnabled(!whatsappEnabled);
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  }}
+                >
+                  <Text style={[styles.toggleText, whatsappEnabled && styles.toggleTextActive]}>
+                    {whatsappEnabled ? 'ON' : 'OFF'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* Test phone number input for SMS/WhatsApp testing */}
+              <View style={styles.testSection}>
+                <Text style={styles.testSectionTitle}>Test Notification</Text>
+                <TextInput
+                  style={styles.testInput}
+                  placeholder="Phone number for SMS/WhatsApp test"
+                  placeholderTextColor="#94a3b8"
+                  value={testNumber}
+                  onChangeText={setTestNumber}
+                  keyboardType="phone-pad"
+                />
+                <View style={styles.testButtonsRow}>
+                  <TouchableOpacity
+                    style={styles.testEmailButton}
+                    onPress={() => handleTestNotification('email')}
+                  >
+                    <Mail size={14} color="#fff" />
+                    <Text style={styles.testButtonText}>Test Email</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.testSmsButton}
+                    onPress={() => handleTestNotification('sms')}
+                  >
+                    <Smartphone size={14} color="#fff" />
+                    <Text style={styles.testButtonText}>Test SMS</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.testWaButton}
+                    onPress={() => handleTestNotification('whatsapp')}
+                  >
+                    <MessageCircle size={14} color="#fff" />
+                    <Text style={styles.testButtonText}>Test WA</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* Bulk Send Button */}
+              <TouchableOpacity
+                style={styles.bulkSendButton}
+                onPress={handleSendBulkReminders}
+              >
+                <Send size={16} color="#fff" />
+                <Text style={styles.bulkSendButtonText}>Send Reminders to All Active Borrowers</Text>
+              </TouchableOpacity>
+            </View>
           )}
         </View>
 
@@ -1561,7 +1758,7 @@ export default function AdminScreen() {
                   </Text>
                 </View>
               ) : (
-                getAllAdmins().map(admin => (
+                getAllAdmins().map((admin: User) => (
                   <View key={admin.id} style={styles.adminItem}>
                     <View style={styles.adminIcon}>
                       <Eye size={20} color="#7c3aed" />
@@ -2335,6 +2532,137 @@ const styles = StyleSheet.create({
     backgroundColor: '#0891b2',
   },
   pdfButtonText: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#fff',
+  },
+  notifSettingsContent: {
+    paddingTop: 16,
+  },
+  notifSettingsDesc: {
+    fontSize: 13,
+    color: '#64748b',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  notifChannelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  notifChannelInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  notifChannelText: {
+    flex: 1,
+  },
+  notifChannelLabel: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#1e293b',
+  },
+  notifChannelDesc: {
+    fontSize: 11,
+    color: '#94a3b8',
+    marginTop: 2,
+  },
+  toggleButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#e2e8f0',
+    minWidth: 60,
+    alignItems: 'center',
+  },
+  toggleButtonActive: {
+    backgroundColor: '#7c3aed',
+  },
+  toggleText: {
+    fontSize: 12,
+    fontWeight: '700' as const,
+    color: '#64748b',
+  },
+  toggleTextActive: {
+    color: '#fff',
+  },
+  testSection: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
+  testSectionTitle: {
+    fontSize: 14,
+    fontWeight: '600' as const,
+    color: '#1e293b',
+    marginBottom: 12,
+  },
+  testInput: {
+    backgroundColor: '#f8fafc',
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 14,
+    color: '#1e293b',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    marginBottom: 12,
+  },
+  testButtonsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  testEmailButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#7c3aed',
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  testSmsButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#0891b2',
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  testWaButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    backgroundColor: '#10b981',
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  testButtonText: {
+    fontSize: 12,
+    fontWeight: '600' as const,
+    color: '#fff',
+  },
+  bulkSendButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#f59e0b',
+    paddingVertical: 14,
+    borderRadius: 12,
+    marginTop: 16,
+  },
+  bulkSendButtonText: {
     fontSize: 14,
     fontWeight: '600' as const,
     color: '#fff',
