@@ -9,7 +9,6 @@ export interface User {
   name: string;
   phone: string;
   email: string;
-  password: string;
   isAdmin?: boolean;
   role?: 'super_admin' | 'admin_viewer' | 'user';
   invitedBy?: string;

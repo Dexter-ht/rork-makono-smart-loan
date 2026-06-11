@@ -1,27 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
-import { useState, useEffect } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { User, OTP, NotificationPreferences } from '@/types/loan';
-
-const STORAGE_KEYS = {
-  USER: 'makono_user',
-  USERS: 'makono_users',
-  OTPS: 'makono_otps',
-} as const;
-
-const hashPassword = (password: string): string => {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password);
-  let result = '';
-  for (let i = 0; i < data.length; i++) {
-    result += String.fromCharCode(data[i]);
-  }
-  return btoa(result);
-};
-
-const verifyPassword = (password: string, hashedPassword: string): boolean => {
-  return hashPassword(password) === hashedPassword;
-};
+import { useState, useEffect, useCallback } from 'react';
+import { supabase } from '@/lib/supabase';
+import type { User, OTP, NotificationPreferences } from '@/types/loan';
 
 export const [AuthContext, useAuth] = createContextHook(() => {
   const [user, setUser] = useState<User | null>(null);
@@ -29,93 +9,165 @@ export const [AuthContext, useAuth] = createContextHook(() => {
   const [users, setUsers] = useState<User[]>([]);
   const [otps, setOtps] = useState<OTP[]>([]);
 
-  useEffect(() => {
-    loadUser();
-    loadUsers();
-    loadOtps();
-  }, []);
+  const seedAdminAccounts = async () => {
+    const admins = [
+      { email: 'admin@makono.com', password: 'admin123', name: 'Super Admin', phone: '1234567890', role: 'super_admin' as const },
+      { email: 'viewer@makono.com', password: 'viewer123', name: 'Admin Viewer', phone: '0987654321', role: 'admin_viewer' as const },
+    ];
 
-  const loadUser = async () => {
-    try {
-      const storedUser = await AsyncStorage.getItem(STORAGE_KEYS.USER);
-      if (storedUser) {
-        setUser(JSON.parse(storedUser));
+    for (const admin of admins) {
+      const { data: existingProfile } = await supabase.from('profiles').select('id').eq('email', admin.email).single();
+      if (existingProfile) continue;
+
+      const { data, error } = await supabase.auth.signUp({
+        email: admin.email,
+        password: admin.password,
+        options: { data: { name: admin.name, phone: admin.phone } },
+      });
+
+      if (error) {
+        console.warn(`Failed to create admin ${admin.email}:`, error.message);
+        continue;
       }
-    } catch (error) {
-      console.error('Failed to load user:', error);
-    } finally {
-      setIsLoading(false);
+
+      if (data.user) {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          name: admin.name,
+          phone: admin.phone,
+          email: admin.email,
+          role: admin.role,
+        }, { onConflict: 'id' });
+        console.log(`Admin account created: ${admin.email} / ${admin.password}`);
+      }
     }
+
+    console.log('Default admin accounts ready:\n  Super Admin: admin@makono.com / admin123\n  Admin Viewer: viewer@makono.com / viewer123');
   };
 
-  const loadUsers = async () => {
+  const loadUsers = useCallback(async () => {
     try {
-      const storedUsers = await AsyncStorage.getItem(STORAGE_KEYS.USERS);
-      if (storedUsers) {
-        const parsedUsers = JSON.parse(storedUsers);
-        console.log('Loaded users from storage:', parsedUsers.length);
-        setUsers(parsedUsers);
-      } else {
-        console.log('No users found, creating default accounts');
-        const adminUser: User = {
-          id: 'admin-1',
-          name: 'Super Admin',
-          phone: '1234567890',
-          email: 'admin@makono.com',
-          password: hashPassword('admin123'),
-          isAdmin: true,
-          role: 'super_admin',
-          createdAt: new Date().toISOString(),
-        };
-        const viewerUser: User = {
-          id: 'admin-2',
-          name: 'Admin Viewer',
-          phone: '0987654321',
-          email: 'viewer@makono.com',
-          password: hashPassword('viewer123'),
-          isAdmin: true,
-          role: 'admin_viewer',
-          invitedBy: 'admin-1',
-          createdAt: new Date().toISOString(),
-        };
-        const defaultAccounts = [adminUser, viewerUser];
-        setUsers(defaultAccounts);
-        await AsyncStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(defaultAccounts));
-        console.log('Default accounts created:\n  Super Admin: admin@makono.com / admin123\n  Admin Viewer: viewer@makono.com / viewer123');
+      const { data, error } = await supabase.from('profiles').select('*');
+      if (error) {
+        console.error('Failed to load users:', error.message);
+        return;
       }
+
+      if (!data || data.length === 0) {
+        await seedAdminAccounts();
+        const { data: refreshed } = await supabase.from('profiles').select('*');
+        if (refreshed && refreshed.length > 0) {
+          const mapped: User[] = refreshed.map(p => ({
+            id: p.id,
+            name: p.name,
+            phone: p.phone,
+            email: p.email ?? '',
+            isAdmin: p.role === 'super_admin' || p.role === 'admin_viewer',
+            role: p.role as User['role'],
+            invitedBy: p.invited_by ?? undefined,
+            createdAt: p.created_at ?? new Date().toISOString(),
+            notificationPreferences: (p.notification_preferences as unknown as NotificationPreferences) ?? { email: true, sms: true, whatsapp: true },
+          }));
+          setUsers(mapped);
+        }
+        return;
+      }
+
+      const mapped: User[] = data.map(p => ({
+        id: p.id,
+        name: p.name,
+        phone: p.phone,
+        email: p.email ?? '',
+        isAdmin: p.role === 'super_admin' || p.role === 'admin_viewer',
+        role: p.role as User['role'],
+        invitedBy: p.invited_by ?? undefined,
+        createdAt: p.created_at ?? new Date().toISOString(),
+        notificationPreferences: (p.notification_preferences as unknown as NotificationPreferences) ?? { email: true, sms: true, whatsapp: true },
+      }));
+      setUsers(mapped);
     } catch (error) {
       console.error('Failed to load users:', error);
     }
-  };
+  }, []);
 
-  const loadOtps = async () => {
+  const loadOtps = useCallback(async () => {
+    if (!user) return;
     try {
-      const storedOtps = await AsyncStorage.getItem(STORAGE_KEYS.OTPS);
-      if (storedOtps) {
-        setOtps(JSON.parse(storedOtps));
+      const { data, error } = await supabase.from('otps').select('*').eq('user_id', user.id);
+      if (error) {
+        console.error('Failed to load OTPs:', error.message);
+        return;
       }
+      setOtps((data ?? []).map(o => ({
+        userId: o.user_id,
+        code: o.code,
+        expiresAt: o.expires_at,
+        verified: o.verified ?? false,
+      })));
     } catch (error) {
       console.error('Failed to load OTPs:', error);
     }
-  };
+  }, [user]);
 
-  const saveUsers = async (updatedUsers: User[]) => {
+  const fetchProfile = useCallback(async (userId: string): Promise<User | null> => {
     try {
-      await AsyncStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
-      setUsers(updatedUsers);
-    } catch (error) {
-      console.error('Failed to save users:', error);
-    }
-  };
+      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
+      if (error || !data) return null;
 
-  const saveOtps = async (updatedOtps: OTP[]) => {
-    try {
-      await AsyncStorage.setItem(STORAGE_KEYS.OTPS, JSON.stringify(updatedOtps));
-      setOtps(updatedOtps);
+      const profile: User = {
+        id: data.id,
+        name: data.name,
+        phone: data.phone,
+        email: data.email ?? '',
+        isAdmin: data.role === 'super_admin' || data.role === 'admin_viewer',
+        role: data.role as User['role'],
+        invitedBy: data.invited_by ?? undefined,
+        createdAt: data.created_at ?? new Date().toISOString(),
+        notificationPreferences: (data.notification_preferences as unknown as NotificationPreferences) ?? { email: true, sms: true, whatsapp: true },
+      };
+      return profile;
     } catch (error) {
-      console.error('Failed to save OTPs:', error);
+      console.error('Failed to fetch profile:', error);
+      return null;
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.user) {
+        const profile = await fetchProfile(session.user.id);
+        if (profile) {
+          setUser(profile);
+        } else {
+          const baseProfile: User = {
+            id: session.user.id,
+            name: session.user.user_metadata?.name ?? '',
+            phone: session.user.user_metadata?.phone ?? '',
+            email: session.user.email ?? '',
+            isAdmin: false,
+            role: 'user',
+            createdAt: new Date().toISOString(),
+          };
+          setUser(baseProfile);
+        }
+      } else {
+        setUser(null);
+      }
+      setIsLoading(false);
+    });
+
+    loadUsers();
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [fetchProfile, loadUsers]);
+
+  useEffect(() => {
+    if (user) {
+      loadOtps();
+    }
+  }, [user, loadOtps]);
 
   const register = async (
     name: string,
@@ -124,30 +176,40 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     password: string
   ): Promise<{ success: boolean; userId?: string; error?: string }> => {
     try {
-      const storedUsers = await AsyncStorage.getItem(STORAGE_KEYS.USERS);
-      const currentUsers = storedUsers ? JSON.parse(storedUsers) : [];
-      
-      const existingUser = currentUsers.find((u: User) => u.email === email || u.phone === phone);
-      if (existingUser) {
-        return { success: false, error: 'User already exists with this email or phone' };
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { name, phone },
+        },
+      });
+
+      if (error) {
+        if (error.message?.includes('already registered') || error.message?.includes('already exists')) {
+          return { success: false, error: 'A user with this email already exists' };
+        }
+        return { success: false, error: error.message };
       }
 
-      const newUser: User = {
-        id: `user-${Date.now()}`,
+      if (!data.user) {
+        return { success: false, error: 'Registration failed' };
+      }
+
+      const { error: profileError } = await supabase.from('profiles').upsert({
+        id: data.user.id,
         name,
         phone,
         email,
-        password: hashPassword(password),
-        isAdmin: false,
         role: 'user',
-        createdAt: new Date().toISOString(),
-      };
+      }, { onConflict: 'id' });
 
-      const updatedUsers = [...currentUsers, newUser];
-      await AsyncStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
-      setUsers(updatedUsers);
+      if (profileError) {
+        console.error('Failed to create profile:', profileError.message);
+      }
+
       console.log('User registered successfully:', email);
-      return { success: true, userId: newUser.id };
+      await loadUsers();
+      return { success: true, userId: data.user.id };
     } catch (error) {
       console.error('Registration error:', error);
       return { success: false, error: 'Registration failed' };
@@ -159,15 +221,19 @@ export const [AuthContext, useAuth] = createContextHook(() => {
       const code = Math.floor(100000 + Math.random() * 900000).toString();
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
 
-      const newOtp: OTP = {
-        userId,
-        code,
-        expiresAt,
-        verified: false,
-      };
+      await supabase.from('otps').delete().eq('user_id', userId);
 
-      const filteredOtps = otps.filter(o => o.userId !== userId);
-      await saveOtps([...filteredOtps, newOtp]);
+      const { error } = await supabase.from('otps').insert({
+        user_id: userId,
+        code,
+        expires_at: expiresAt,
+        verified: false,
+      });
+
+      if (error) {
+        console.error('Failed to generate OTP:', error.message);
+        return { success: false, error: 'Failed to generate OTP' };
+      }
 
       console.log(`OTP for user ${userId}: ${code}`);
       return { success: true, otp: code };
@@ -179,23 +245,26 @@ export const [AuthContext, useAuth] = createContextHook(() => {
 
   const verifyOTP = async (userId: string, code: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const otp = otps.find(o => o.userId === userId && o.code === code);
+      const { data, error } = await supabase
+        .from('otps')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('code', code)
+        .single();
 
-      if (!otp) {
+      if (error || !data) {
         return { success: false, error: 'Invalid OTP code' };
       }
 
-      if (new Date(otp.expiresAt) < new Date()) {
+      if (new Date(data.expires_at) < new Date()) {
         return { success: false, error: 'OTP has expired' };
       }
 
-      otp.verified = true;
-      await saveOtps([...otps]);
+      await supabase.from('otps').update({ verified: true }).eq('user_id', userId).eq('code', code);
 
-      const foundUser = users.find(u => u.id === userId);
-      if (foundUser) {
-        await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(foundUser));
-        setUser(foundUser);
+      const profile = await fetchProfile(userId);
+      if (profile) {
+        setUser(profile);
       }
 
       return { success: true };
@@ -207,24 +276,29 @@ export const [AuthContext, useAuth] = createContextHook(() => {
 
   const login = async (email: string, password: string): Promise<{ success: boolean; userId?: string; error?: string }> => {
     try {
-      const storedUsers = await AsyncStorage.getItem(STORAGE_KEYS.USERS);
-      const currentUsers = storedUsers ? JSON.parse(storedUsers) : [];
-      console.log('Login attempt for:', email, 'Total users:', currentUsers.length);
-      
-      const foundUser = currentUsers.find((u: User) => u.email === email);
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-      if (!foundUser) {
-        console.log('User not found:', email);
-        return { success: false, error: 'User not found' };
+      if (error) {
+        if (error.message?.includes('Invalid login credentials')) {
+          return { success: false, error: 'Invalid email or password' };
+        }
+        return { success: false, error: error.message };
       }
 
-      if (!verifyPassword(password, foundUser.password)) {
-        console.log('Invalid password for:', email);
-        return { success: false, error: 'Invalid password' };
+      if (!data.user) {
+        return { success: false, error: 'Login failed' };
+      }
+
+      const profile = await fetchProfile(data.user.id);
+      if (profile) {
+        setUser(profile);
       }
 
       console.log('Login successful for:', email);
-      return { success: true, userId: foundUser.id };
+      return { success: true, userId: data.user.id };
     } catch (error) {
       console.error('Login error:', error);
       return { success: false, error: 'Login failed' };
@@ -233,7 +307,7 @@ export const [AuthContext, useAuth] = createContextHook(() => {
 
   const logout = async () => {
     try {
-      await AsyncStorage.removeItem(STORAGE_KEYS.USER);
+      await supabase.auth.signOut();
       setUser(null);
     } catch (error) {
       console.error('Logout error:', error);
@@ -246,25 +320,38 @@ export const [AuthContext, useAuth] = createContextHook(() => {
         return { success: false, error: 'Only super admins can invite other admins' };
       }
 
-      const existingUser = users.find(u => u.email === email);
-      if (existingUser) {
-        return { success: false, error: 'User with this email already exists' };
+      const tempPassword = Math.random().toString(36).slice(-8);
+
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: tempPassword,
+      });
+
+      if (error) {
+        if (error.message?.includes('already registered')) {
+          const { data: existingProfiles } = await supabase.from('profiles').select('id').eq('email', email).single();
+          if (existingProfiles) {
+            await supabase.from('profiles').update({ role: 'admin_viewer', invited_by: user.id }).eq('id', existingProfiles.id);
+            await loadUsers();
+            return { success: true };
+          }
+          return { success: false, error: 'User with this email already exists' };
+        }
+        return { success: false, error: error.message };
       }
 
-      const tempPassword = Math.random().toString(36).slice(-8);
-      const newAdmin: User = {
-        id: `admin-${Date.now()}`,
-        name: 'Admin Viewer',
-        phone: '',
-        email,
-        password: hashPassword(tempPassword),
-        isAdmin: true,
-        role: 'admin_viewer',
-        invitedBy: user.id,
-        createdAt: new Date().toISOString(),
-      };
+      if (data.user) {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          name: 'Admin Viewer',
+          phone: '',
+          email,
+          role: 'admin_viewer',
+          invited_by: user.id,
+        }, { onConflict: 'id' });
+      }
 
-      await saveUsers([...users, newAdmin]);
+      await loadUsers();
       console.log(`Invited admin viewer: ${email} with temporary password: ${tempPassword}`);
       return { success: true };
     } catch (error) {
@@ -285,28 +372,46 @@ export const [AuthContext, useAuth] = createContextHook(() => {
       }
 
       if (role !== 'admin_viewer' && role !== 'user') {
-        return { success: false, error: 'Invalid role. Only admin_viewer and user accounts can be created.' };
-      }
-
-      const existingUser = users.find(u => u.email === email || u.phone === phone);
-      if (existingUser) {
-        return { success: false, error: 'User with this email or phone already exists' };
+        return { success: false, error: 'Invalid role' };
       }
 
       const tempPassword = Math.random().toString(36).slice(-8);
-      const newUser: User = {
-        id: `${role === 'admin_viewer' ? 'admin' : 'user'}-${Date.now()}`,
-        name,
-        phone,
-        email,
-        password: hashPassword(tempPassword),
-        isAdmin: role === 'admin_viewer',
-        role,
-        invitedBy: user.id,
-        createdAt: new Date().toISOString(),
-      };
 
-      await saveUsers([...users, newUser]);
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password: tempPassword,
+      });
+
+      if (error) {
+        if (error.message?.includes('already registered')) {
+          const { data: existingProfiles } = await supabase.from('profiles').select('id').eq('email', email).single();
+          if (existingProfiles) {
+            await supabase.from('profiles').update({
+              name,
+              phone,
+              role,
+              invited_by: user.id,
+            }).eq('id', existingProfiles.id);
+            await loadUsers();
+            return { success: true, password: tempPassword };
+          }
+          return { success: false, error: 'User with this email already exists' };
+        }
+        return { success: false, error: error.message };
+      }
+
+      if (data.user) {
+        await supabase.from('profiles').upsert({
+          id: data.user.id,
+          name,
+          phone,
+          email,
+          role,
+          invited_by: user.id,
+        }, { onConflict: 'id' });
+      }
+
+      await loadUsers();
       console.log(`Created ${role} account: ${email} with temporary password: ${tempPassword}`);
       return { success: true, password: tempPassword };
     } catch (error) {
@@ -315,31 +420,34 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     }
   };
 
-  const getAllAdmins = (): User[] => {
+  const getAllAdmins = useCallback((): User[] => {
     return users.filter(u => u.role === 'admin_viewer');
-  };
+  }, [users]);
 
-  const getAllUsers = (): User[] => {
+  const getAllUsers = useCallback((): User[] => {
     return users;
-  };
+  }, [users]);
 
-  const getUserById = (userId: string): User | undefined => {
+  const getUserById = useCallback((userId: string): User | undefined => {
     return users.find(u => u.id === userId);
-  };
+  }, [users]);
 
   const updateNotificationPreferences = async (userId: string, prefs: NotificationPreferences): Promise<boolean> => {
     try {
-      const updatedUsers = users.map(u =>
-        u.id === userId
-          ? { ...u, notificationPreferences: prefs }
-          : u
-      );
-      await saveUsers(updatedUsers);
-      if (user?.id === userId) {
-        const updatedUser = { ...user, notificationPreferences: prefs };
-        await AsyncStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(updatedUser));
-        setUser(updatedUser);
+      const { error } = await supabase.from('profiles').update({
+        notification_preferences: JSON.parse(JSON.stringify(prefs)),
+      }).eq('id', userId);
+
+      if (error) {
+        console.error('Failed to update notification preferences:', error.message);
+        return false;
       }
+
+      if (user?.id === userId) {
+        setUser(prev => prev ? { ...prev, notificationPreferences: prefs } : null);
+      }
+
+      await loadUsers();
       return true;
     } catch (error) {
       console.error('Failed to update notification preferences:', error);
@@ -347,25 +455,25 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     }
   };
 
-  const getSuperAdmin = (): User | undefined => {
+  const getSuperAdmin = useCallback((): User | undefined => {
     return users.find(u => u.role === 'super_admin');
-  };
+  }, [users]);
 
-  const isSuperAdmin = (): boolean => {
+  const isSuperAdmin = useCallback((): boolean => {
     return user?.role === 'super_admin';
-  };
+  }, [user]);
 
-  const canApproveLoans = (): boolean => {
+  const canApproveLoans = useCallback((): boolean => {
     return user?.role === 'super_admin';
-  };
+  }, [user]);
 
-  const canUploadPayment = (): boolean => {
+  const canUploadPayment = useCallback((): boolean => {
     return user?.role === 'super_admin';
-  };
+  }, [user]);
 
-  const isAdminViewer = (): boolean => {
+  const isAdminViewer = useCallback((): boolean => {
     return user?.role === 'admin_viewer';
-  };
+  }, [user]);
 
   return {
     user,
