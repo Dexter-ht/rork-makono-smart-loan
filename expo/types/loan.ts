@@ -41,6 +41,10 @@ export interface LoanApplication {
   isOverdue?: boolean;
   remindersSent?: number;
   lastReminderAt?: string;
+  totalPaidSoFar?: number;
+  remainingBalance?: number;
+  rolloverId?: string;
+  isRollover?: boolean;
 }
 
 export interface Document {
@@ -81,11 +85,42 @@ export interface RepaymentSchedule {
   totalPaid?: number;
 }
 
+export interface PaymentRecord {
+  id: string;
+  loanId: string;
+  userId: string;
+  amount: number;
+  proofUri?: string;
+  proofFileName?: string;
+  isPartial: boolean;
+  remainingAfter: number;
+  rolloverCalculated: boolean;
+  rolloverRemaining?: number;
+  rolloverInterest?: number;
+  rolloverTotalPayable?: number;
+  rolloverDueDate?: string;
+  paidAt: string;
+}
+
+export interface RolloverLoan {
+  originalLoanId: string;
+  rolloverLoanId: string;
+  originalAmount: number;
+  paidAmount: number;
+  remainingPrincipal: number;
+  rolloverInterest: number;
+  rolloverTotalPayable: number;
+  rolloverPeriod: number;
+  rolloverMonthlyPayment: number;
+  reason: 'partial_payment';
+  calculatedAt: string;
+}
+
 export interface Notification {
   id: string;
   userId: string;
   loanId?: string;
-  type: 'loan_approved' | 'loan_disbursed' | 'payment_reminder' | 'payment_overdue';
+  type: 'loan_approved' | 'loan_disbursed' | 'payment_reminder' | 'payment_overdue' | 'partial_payment' | 'rollover';
   title: string;
   message: string;
   read: boolean;

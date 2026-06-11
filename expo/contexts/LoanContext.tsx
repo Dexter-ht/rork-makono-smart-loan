@@ -1,7 +1,7 @@
 import createContextHook from '@nkzw/create-context-hook';
 import { useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LoanApplication, Document, LoanCalculation, AmortizationEntry, RepaymentSchedule, Notification } from '@/types/loan';
+import { LoanApplication, Document, LoanCalculation, AmortizationEntry, RepaymentSchedule, Notification, PaymentRecord, RolloverLoan } from '@/types/loan';
 import { DEFAULT_INTEREST_RATE } from '@/constants/loanTypes';
 import { useAuth } from './AuthContext';
 
@@ -11,6 +11,8 @@ const STORAGE_KEYS = {
   SCHEDULES: 'makono_schedules',
   INTEREST_RATE: 'makono_interest_rate',
   NOTIFICATIONS: 'makono_notifications',
+  PAYMENTS: 'makono_payments',
+  ROLLOVERS: 'makono_rollovers',
 } as const;
 
 export const [LoanContext, useLoans] = createContextHook(() => {
@@ -20,6 +22,8 @@ export const [LoanContext, useLoans] = createContextHook(() => {
   const [schedules, setSchedules] = useState<RepaymentSchedule[]>([]);
   const [currentInterestRate, setCurrentInterestRate] = useState<number>(DEFAULT_INTEREST_RATE);
   const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [rollovers, setRollovers] = useState<RolloverLoan[]>([]);
 
   useEffect(() => {
     loadLoans();
@@ -27,6 +31,8 @@ export const [LoanContext, useLoans] = createContextHook(() => {
     loadSchedules();
     loadInterestRate();
     loadNotifications();
+    loadPayments();
+    loadRollovers();
   }, []);
 
   useEffect(() => {
@@ -92,6 +98,28 @@ export const [LoanContext, useLoans] = createContextHook(() => {
       }
     } catch (error) {
       console.error('Failed to load notifications:', error);
+    }
+  };
+
+  const loadPayments = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.PAYMENTS);
+      if (stored) {
+        setPayments(JSON.parse(stored));
+      }
+    } catch (error) {
+      console.error('Failed to load payments:', error);
+    }
+  };
+
+  const loadRollovers = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(STORAGE_KEYS.ROLLOVERS);
+      if (stored) {
+        setRollovers(JSON.parse(stored));
+      }
+    } catch (error) {
+      console.error('Failed to load rollovers:', error);
     }
   };
 
@@ -514,12 +542,187 @@ export const [LoanContext, useLoans] = createContextHook(() => {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   };
 
+  const recordPayment = async (
+    loanId: string,
+    amount: number,
+    proofUri?: string,
+    proofFileName?: string
+  ): Promise<{ success: boolean; paymentId?: string; rolloverCalculated?: boolean; error?: string }> => {
+    try {
+      if (!user) {
+        return { success: false, error: 'User not authenticated' };
+      }
+
+      const loan = loans.find(l => l.id === loanId);
+      if (!loan) {
+        return { success: false, error: 'Loan not found' };
+      }
+
+      if (amount <= 0) {
+        return { success: false, error: 'Payment amount must be greater than 0' };
+      }
+
+      const totalPaidSoFar = (loan.totalPaidSoFar || 0) + amount;
+      const totalPayable = loan.totalPayable;
+      const isPartial = totalPaidSoFar < totalPayable;
+      const remainingAfter = Math.max(0, totalPayable - totalPaidSoFar);
+
+      const paymentRecord: PaymentRecord = {
+        id: `pay-${Date.now()}`,
+        loanId,
+        userId: user.id,
+        amount,
+        proofUri,
+        proofFileName,
+        isPartial,
+        remainingAfter,
+        rolloverCalculated: false,
+        paidAt: new Date().toISOString(),
+      };
+
+      let rolloverCalculated = false;
+      let updatedLoans = [...loans];
+      const updatedPayments = [...payments, paymentRecord];
+      const updatedRollovers = [...rollovers];
+
+      if (isPartial) {
+        const remainingPrincipal = loan.amount - totalPaidSoFar;
+        if (remainingPrincipal > 0) {
+          const rolloverPeriod = loan.repaymentPeriod;
+          const rolloverInterest = remainingPrincipal * (loan.interestRate / 100) * rolloverPeriod;
+          const rolloverTotalPayable = remainingPrincipal + rolloverInterest;
+          const rolloverMonthlyPayment = rolloverTotalPayable / rolloverPeriod;
+          const rolloverDueDate = new Date();
+          rolloverDueDate.setMonth(rolloverDueDate.getMonth() + rolloverPeriod);
+
+          const rolloverLoan: RolloverLoan = {
+            originalLoanId: loanId,
+            rolloverLoanId: `loan-rollover-${Date.now()}`,
+            originalAmount: loan.amount,
+            paidAmount: totalPaidSoFar,
+            remainingPrincipal,
+            rolloverInterest,
+            rolloverTotalPayable,
+            rolloverPeriod,
+            rolloverMonthlyPayment,
+            reason: 'partial_payment',
+            calculatedAt: new Date().toISOString(),
+          };
+
+          updatedRollovers.push(rolloverLoan);
+
+          const rolloverApplication: LoanApplication = {
+            id: rolloverLoan.rolloverLoanId,
+            userId: loan.userId,
+            amount: remainingPrincipal,
+            repaymentPeriod: rolloverPeriod,
+            loanType: loan.loanType,
+            purpose: loan.purpose,
+            interestRate: loan.interestRate,
+            totalPayable: rolloverTotalPayable,
+            monthlyPayment: rolloverMonthlyPayment,
+            status: 'approved' as const,
+            createdAt: new Date().toISOString(),
+            approvedAt: new Date().toISOString(),
+            isRollover: true,
+          };
+
+          updatedLoans.push(rolloverApplication);
+
+          paymentRecord.rolloverCalculated = true;
+          paymentRecord.rolloverRemaining = remainingPrincipal;
+          paymentRecord.rolloverInterest = rolloverInterest;
+          paymentRecord.rolloverTotalPayable = rolloverTotalPayable;
+          paymentRecord.rolloverDueDate = rolloverDueDate.toISOString();
+
+          updatedLoans = updatedLoans.map(l =>
+            l.id === loanId
+              ? {
+                  ...l,
+                  status: 'completed' as const,
+                  totalPaidSoFar,
+                  remainingBalance: remainingAfter,
+                  rolloverId: rolloverLoan.rolloverLoanId,
+                }
+              : l
+          );
+
+          rolloverCalculated = true;
+
+          await createNotification(
+            loan.userId,
+            'rollover',
+            'Roll-over Loan Created',
+            `Your partial payment of MKW ${amount.toLocaleString()} was received. Remaining balance of MKW ${remainingPrincipal.toLocaleString()} has been rolled over. New total payable: MKW ${rolloverTotalPayable.toFixed(2)} (${rolloverPeriod} months at ${loan.interestRate}% monthly).`,
+            rolloverLoan.rolloverLoanId
+          );
+        }
+      } else {
+        updatedLoans = updatedLoans.map(l =>
+          l.id === loanId
+            ? {
+                ...l,
+                status: 'completed' as const,
+                totalPaidSoFar,
+                remainingBalance: 0,
+              }
+            : l
+        );
+      }
+
+      await AsyncStorage.setItem(STORAGE_KEYS.LOANS, JSON.stringify(updatedLoans));
+      await AsyncStorage.setItem(STORAGE_KEYS.PAYMENTS, JSON.stringify(updatedPayments));
+      await AsyncStorage.setItem(STORAGE_KEYS.ROLLOVERS, JSON.stringify(updatedRollovers));
+      setLoans(updatedLoans);
+      setPayments(updatedPayments);
+      setRollovers(updatedRollovers);
+
+      await createNotification(
+        loan.userId,
+        'partial_payment',
+        'Payment Recorded',
+        `Your payment of MKW ${amount.toLocaleString()} has been recorded. ${isPartial ? `Remaining: MKW ${remainingAfter.toLocaleString()}` : 'Loan fully paid!'}`,
+        loanId
+      );
+
+      return { success: true, paymentId: paymentRecord.id, rolloverCalculated };
+    } catch (error) {
+      console.error('Failed to record payment:', error);
+      return { success: false, error: 'Failed to record payment' };
+    }
+  };
+
+  const getUserPayments = () => {
+    if (!user) return [];
+    return payments
+      .filter(p => p.userId === user.id)
+      .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
+  };
+
+  const getLoanPayments = (loanId: string) => {
+    return payments
+      .filter(p => p.loanId === loanId)
+      .sort((a, b) => new Date(b.paidAt).getTime() - new Date(a.paidAt).getTime());
+  };
+
+  const getLoanRollover = (loanId: string) => {
+    return rollovers.find(r => r.originalLoanId === loanId);
+  };
+
+  const getUserRollovers = () => {
+    if (!user) return [];
+    const userLoanIds = new Set(loans.filter(l => l.userId === user.id).map(l => l.id));
+    return rollovers.filter(r => userLoanIds.has(r.originalLoanId));
+  };
+
   return {
     loans,
     documents,
     schedules,
     currentInterestRate,
     notifications,
+    payments,
+    rollovers,
     calculateLoan,
     createLoanApplication,
     uploadDocument,
@@ -537,5 +740,10 @@ export const [LoanContext, useLoans] = createContextHook(() => {
     markNotificationAsRead,
     getLoanHistory,
     getAllLoansForUser,
+    recordPayment,
+    getUserPayments,
+    getLoanPayments,
+    getLoanRollover,
+    getUserRollovers,
   };
 });

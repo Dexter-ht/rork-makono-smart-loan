@@ -1,11 +1,12 @@
 import { Tabs } from 'expo-router';
 import React from 'react';
-import { Home, FileText, Calculator, Shield } from 'lucide-react-native';
+import { Home, FileText, Calculator, Shield, DollarSign } from 'lucide-react-native';
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function TabLayout() {
   const { user } = useAuth();
-  const isAdmin = user?.isAdmin;
+  const isSuperAdmin = user?.role === 'super_admin';
+  const isRegularUser = user?.role === 'user' || !user?.isAdmin;
 
   return (
     <Tabs
@@ -52,7 +53,16 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => <Calculator size={size} color={color} />,
         }}
       />
-      {isAdmin && (
+      {isRegularUser && (
+        <Tabs.Screen
+          name="payments"
+          options={{
+            title: 'Payments',
+            tabBarIcon: ({ color, size }) => <DollarSign size={size} color={color} />,
+          }}
+        />
+      )}
+      {isSuperAdmin && (
         <Tabs.Screen
           name="admin"
           options={{
