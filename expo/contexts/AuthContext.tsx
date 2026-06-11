@@ -56,10 +56,10 @@ export const [AuthContext, useAuth] = createContextHook(() => {
         console.log('Loaded users from storage:', parsedUsers.length);
         setUsers(parsedUsers);
       } else {
-        console.log('No users found, creating default admin');
+        console.log('No users found, creating default accounts');
         const adminUser: User = {
           id: 'admin-1',
-          name: 'Admin User',
+          name: 'Super Admin',
           phone: '1234567890',
           email: 'admin@makono.com',
           password: hashPassword('admin123'),
@@ -67,8 +67,21 @@ export const [AuthContext, useAuth] = createContextHook(() => {
           role: 'super_admin',
           createdAt: new Date().toISOString(),
         };
-        setUsers([adminUser]);
-        await AsyncStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify([adminUser]));
+        const viewerUser: User = {
+          id: 'admin-2',
+          name: 'Admin Viewer',
+          phone: '0987654321',
+          email: 'viewer@makono.com',
+          password: hashPassword('viewer123'),
+          isAdmin: true,
+          role: 'admin_viewer',
+          invitedBy: 'admin-1',
+          createdAt: new Date().toISOString(),
+        };
+        const defaultAccounts = [adminUser, viewerUser];
+        setUsers(defaultAccounts);
+        await AsyncStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(defaultAccounts));
+        console.log('Default accounts created:\n  Super Admin: admin@makono.com / admin123\n  Admin Viewer: viewer@makono.com / viewer123');
       }
     } catch (error) {
       console.error('Failed to load users:', error);
