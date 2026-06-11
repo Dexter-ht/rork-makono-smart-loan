@@ -125,7 +125,7 @@ export const [LoanContext, useLoans] = createContextHook(() => {
 
   const createNotification = async (
     userId: string,
-    type: 'loan_approved' | 'loan_disbursed' | 'payment_reminder' | 'payment_overdue',
+    type: 'loan_approved' | 'loan_disbursed' | 'payment_reminder' | 'payment_overdue' | 'partial_payment' | 'rollover',
     title: string,
     message: string,
     loanId?: string

@@ -6,6 +6,7 @@ import { useAuth } from '@/contexts/AuthContext';
 export default function TabLayout() {
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'super_admin';
+  const isAdmin = user?.role === 'super_admin' || user?.role === 'admin_viewer';
   const isRegularUser = user?.role === 'user' || !user?.isAdmin;
 
   return (
@@ -62,7 +63,7 @@ export default function TabLayout() {
           }}
         />
       )}
-      {isSuperAdmin && (
+      {isAdmin && (
         <Tabs.Screen
           name="admin"
           options={{
