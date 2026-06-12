@@ -396,8 +396,8 @@ export default function ApplyScreen() {
 
         <View style={styles.section}>
           <Text style={styles.label}>Purpose</Text>
-          <View style={styles.inputContainer}>
-            <FileText size={20} color="#0891b2" />
+          <View style={styles.purposeContainer}>
+            <FileText size={20} color="#0891b2" style={styles.purposeIcon} />
             <View style={styles.pickerContainer}>
               {LOAN_PURPOSES.map((p, index) => (
                 <TouchableOpacity
@@ -653,6 +653,18 @@ const styles = StyleSheet.create({
     height: 56,
     borderWidth: 1,
     borderColor: '#e2e8f0',
+  },
+  purposeContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+  },
+  purposeIcon: {
+    marginTop: 6,
   },
   input: {
     flex: 1,
