@@ -5,7 +5,7 @@ export const LOAN_TYPES = [
 
 export const MAX_REPAYMENT_MONTHS = 2;
 
-export const DEFAULT_INTEREST_RATE = 30;
+export const DEFAULT_INTEREST_RATE = 35;
 
 export const LOAN_PURPOSES = [
   'Medical expenses',
