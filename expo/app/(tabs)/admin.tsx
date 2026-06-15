@@ -8,6 +8,7 @@ import {
   Alert,
   TextInput,
   Modal,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -45,6 +46,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as DocumentPicker from 'expo-document-picker';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
 import { sendExternalNotification, isWhatsAppAvailable } from '@/services/NotificationService';
 
 export default function AdminScreen() {
@@ -315,6 +317,29 @@ export default function AdminScreen() {
     }
   };
 
+  const sharePdf = async (uri: string, dialogTitle: string) => {
+    const isAvailable = await Sharing.isAvailableAsync();
+    if (!isAvailable) {
+      Alert.alert('Sharing Unavailable', 'File sharing is not supported on this device.');
+      return;
+    }
+
+    let shareUri = uri;
+    if (Platform.OS === 'android') {
+      try {
+        shareUri = await FileSystem.getContentUriAsync(uri);
+      } catch {
+        // Fall back to original URI if content URI conversion fails
+      }
+    }
+
+    await Sharing.shareAsync(shareUri, {
+      mimeType: 'application/pdf',
+      dialogTitle,
+      UTI: '.pdf',
+    });
+  };
+
   const generateBorrowerReport = async () => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
@@ -433,15 +458,11 @@ export default function AdminScreen() {
       `;
 
       const { uri } = await Print.printToFileAsync({ html });
-      await Sharing.shareAsync(uri, {
-        mimeType: 'application/pdf',
-        dialogTitle: 'Share Borrowers Report',
-        UTI: 'com.adobe.pdf',
-      });
+      await sharePdf(uri, 'Share Borrowers Report');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       console.error('Failed to generate borrower report:', error);
-      Alert.alert('Error', 'Failed to generate PDF report');
+      Alert.alert('Error', `Failed to generate PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -585,15 +606,11 @@ export default function AdminScreen() {
       `;
 
       const { uri } = await Print.printToFileAsync({ html });
-      await Sharing.shareAsync(uri, {
-        mimeType: 'application/pdf',
-        dialogTitle: 'Share Admin Report',
-        UTI: 'com.adobe.pdf',
-      });
+      await sharePdf(uri, 'Share Admin Report');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       console.error('Failed to generate admin report:', error);
-      Alert.alert('Error', 'Failed to generate PDF report');
+      Alert.alert('Error', `Failed to generate PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
@@ -909,15 +926,11 @@ export default function AdminScreen() {
       `;
 
       const { uri } = await Print.printToFileAsync({ html });
-      await Sharing.shareAsync(uri, {
-        mimeType: 'application/pdf',
-        dialogTitle: 'Share Statement of Account',
-        UTI: 'com.adobe.pdf',
-      });
+      await sharePdf(uri, 'Share Statement of Account');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       console.error('Failed to generate statement of account:', error);
-      Alert.alert('Error', 'Failed to generate Statement of Account PDF');
+      Alert.alert('Error', `Failed to generate PDF: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
