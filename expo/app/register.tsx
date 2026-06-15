@@ -8,7 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const { register, generateOTP } = useAuth();
+  const { register } = useAuth();
   const [name, setName] = useState<string>('');
   const [phone, setPhone] = useState<string>('');
   const [email, setEmail] = useState<string>('');
@@ -36,15 +36,8 @@ export default function RegisterScreen() {
     const result = await register(name, phone, email, password);
     setIsLoading(false);
 
-    if (result.success && result.userId) {
-      const otpResult = await generateOTP(result.userId);
-      if (otpResult.success) {
-        Alert.alert('OTP Sent', `Your OTP is: ${otpResult.otp}`);
-        router.replace({
-          pathname: '/verify-otp',
-          params: { userId: result.userId },
-        });
-      }
+    if (result.success) {
+      router.replace('/(tabs)/dashboard');
     } else {
       Alert.alert('Registration Failed', result.error || 'Please try again');
     }

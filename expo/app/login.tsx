@@ -8,7 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { login, generateOTP } = useAuth();
+  const { login } = useAuth();
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -23,15 +23,8 @@ export default function LoginScreen() {
     const result = await login(email, password);
     setIsLoading(false);
 
-    if (result.success && result.userId) {
-      const otpResult = await generateOTP(result.userId);
-      if (otpResult.success) {
-        Alert.alert('OTP Sent', `Your OTP is: ${otpResult.otp}`);
-        router.push({
-          pathname: '/verify-otp',
-          params: { userId: result.userId },
-        });
-      }
+    if (result.success) {
+      router.replace('/(tabs)/dashboard');
     } else {
       Alert.alert('Login Failed', result.error || 'Please try again');
     }

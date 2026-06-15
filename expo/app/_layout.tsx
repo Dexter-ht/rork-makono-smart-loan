@@ -32,7 +32,7 @@ function RootLayoutNav() {
 
     if (!user && inAuthGroup) {
       router.replace('/');
-    } else if (user && !inAuthGroup && segments[0] !== 'verify-otp') {
+    } else if (user && !inAuthGroup) {
       router.replace('/(tabs)/dashboard');
     }
   }, [user, isLoading, segments, hasNavigated, router]);
@@ -43,7 +43,6 @@ function RootLayoutNav() {
       <Stack.Screen name="index" options={{ headerShown: false }} />
       <Stack.Screen name="login" options={{ headerShown: false }} />
       <Stack.Screen name="register" options={{ headerShown: false }} />
-      <Stack.Screen name="verify-otp" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
     </Stack>
   );

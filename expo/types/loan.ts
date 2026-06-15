@@ -16,13 +16,6 @@ export interface User {
   notificationPreferences?: NotificationPreferences;
 }
 
-export interface OTP {
-  userId: string;
-  code: string;
-  expiresAt: string;
-  verified: boolean;
-}
-
 export interface LoanApplication {
   id: string;
   userId: string;

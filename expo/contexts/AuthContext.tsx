@@ -1,13 +1,12 @@
 import createContextHook from '@nkzw/create-context-hook';
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
-import type { User, OTP, NotificationPreferences } from '@/types/loan';
+import type { User, NotificationPreferences } from '@/types/loan';
 
 export const [AuthContext, useAuth] = createContextHook(() => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [users, setUsers] = useState<User[]>([]);
-  const [otps, setOtps] = useState<OTP[]>([]);
 
   const seedAdminAccounts = async () => {
     const admins = [
@@ -90,24 +89,6 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     }
   }, []);
 
-  const loadOtps = useCallback(async () => {
-    if (!user) return;
-    try {
-      const { data, error } = await supabase.from('otps').select('*').eq('user_id', user.id);
-      if (error) {
-        console.error('Failed to load OTPs:', error.message);
-        return;
-      }
-      setOtps((data ?? []).map(o => ({
-        userId: o.user_id,
-        code: o.code,
-        expiresAt: o.expires_at,
-        verified: o.verified ?? false,
-      })));
-    } catch (error) {
-      console.error('Failed to load OTPs:', error);
-    }
-  }, [user]);
 
   const fetchProfile = useCallback(async (userId: string): Promise<User | null> => {
     try {
@@ -163,12 +144,6 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     };
   }, [fetchProfile, loadUsers]);
 
-  useEffect(() => {
-    if (user) {
-      loadOtps();
-    }
-  }, [user, loadOtps]);
-
   const register = async (
     name: string,
     phone: string,
@@ -213,64 +188,6 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     } catch (error) {
       console.error('Registration error:', error);
       return { success: false, error: 'Registration failed' };
-    }
-  };
-
-  const generateOTP = async (userId: string): Promise<{ success: boolean; otp?: string; error?: string }> => {
-    try {
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
-
-      await supabase.from('otps').delete().eq('user_id', userId);
-
-      const { error } = await supabase.from('otps').insert({
-        user_id: userId,
-        code,
-        expires_at: expiresAt,
-        verified: false,
-      });
-
-      if (error) {
-        console.error('Failed to generate OTP:', error.message);
-        return { success: false, error: 'Failed to generate OTP' };
-      }
-
-      console.log(`OTP for user ${userId}: ${code}`);
-      return { success: true, otp: code };
-    } catch (error) {
-      console.error('Failed to generate OTP:', error);
-      return { success: false, error: 'Failed to generate OTP' };
-    }
-  };
-
-  const verifyOTP = async (userId: string, code: string): Promise<{ success: boolean; error?: string }> => {
-    try {
-      const { data, error } = await supabase
-        .from('otps')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('code', code)
-        .single();
-
-      if (error || !data) {
-        return { success: false, error: 'Invalid OTP code' };
-      }
-
-      if (new Date(data.expires_at) < new Date()) {
-        return { success: false, error: 'OTP has expired' };
-      }
-
-      await supabase.from('otps').update({ verified: true }).eq('user_id', userId).eq('code', code);
-
-      const profile = await fetchProfile(userId);
-      if (profile) {
-        setUser(profile);
-      }
-
-      return { success: true };
-    } catch (error) {
-      console.error('OTP verification error:', error);
-      return { success: false, error: 'Verification failed' };
     }
   };
 
@@ -479,8 +396,6 @@ export const [AuthContext, useAuth] = createContextHook(() => {
     user,
     isLoading,
     register,
-    generateOTP,
-    verifyOTP,
     login,
     logout,
     inviteAdmin,
