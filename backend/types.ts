@@ -226,35 +226,7 @@ export type Database = {
           },
         ]
       }
-      otps: {
-        Row: {
-          code: string
-          expires_at: string
-          user_id: string
-          verified: boolean | null
-        }
-        Insert: {
-          code: string
-          expires_at: string
-          user_id: string
-          verified?: boolean | null
-        }
-        Update: {
-          code?: string
-          expires_at?: string
-          user_id?: string
-          verified?: boolean | null
-        }
-        Relationships: [
-          {
-            foreignKeyName: "otps_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
+
       payment_records: {
         Row: {
           amount: number
