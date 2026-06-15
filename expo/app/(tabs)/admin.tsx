@@ -318,26 +318,39 @@ export default function AdminScreen() {
   };
 
   const sharePdf = async (uri: string, dialogTitle: string) => {
-    const isAvailable = await Sharing.isAvailableAsync();
-    if (!isAvailable) {
-      Alert.alert('Sharing Unavailable', 'File sharing is not supported on this device.');
-      return;
-    }
-
-    let shareUri = uri;
-    if (Platform.OS === 'android') {
-      try {
-        shareUri = await FileSystem.getContentUriAsync(uri);
-      } catch {
-        // Fall back to original URI if content URI conversion fails
+    try {
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (!isAvailable) {
+        Alert.alert('Sharing Unavailable', 'File sharing is not supported on this device.');
+        return;
       }
-    }
 
-    await Sharing.shareAsync(shareUri, {
-      mimeType: 'application/pdf',
-      dialogTitle,
-      UTI: '.pdf',
-    });
+      let shareUri = uri;
+      if (Platform.OS === 'android') {
+        try {
+          shareUri = await FileSystem.getContentUriAsync(uri);
+        } catch {
+          // Fall back to original URI if content URI conversion fails
+        }
+      }
+
+      await Sharing.shareAsync(shareUri, {
+        mimeType: 'application/pdf',
+        dialogTitle,
+        UTI: '.pdf',
+      });
+    } catch (sharingError) {
+      console.error('Failed to share PDF:', sharingError);
+      Alert.alert('Error', `Failed to share PDF: ${sharingError instanceof Error ? sharingError.message : 'Unknown error'}`);
+    }
+  };
+
+  const printToPdf = async (html: string): Promise<string> => {
+    const result = await Print.printToFileAsync({ html });
+    if (!result || !result.uri) {
+      throw new Error('Print service returned no file — the document may be too large. Try with fewer loans.');
+    }
+    return result.uri;
   };
 
   const generateBorrowerReport = async () => {
@@ -457,7 +470,7 @@ export default function AdminScreen() {
         </html>
       `;
 
-      const { uri } = await Print.printToFileAsync({ html });
+      const uri = await printToPdf(html);
       await sharePdf(uri, 'Share Borrowers Report');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
@@ -605,7 +618,7 @@ export default function AdminScreen() {
         </html>
       `;
 
-      const { uri } = await Print.printToFileAsync({ html });
+      const uri = await printToPdf(html);
       await sharePdf(uri, 'Share Admin Report');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
@@ -925,7 +938,7 @@ export default function AdminScreen() {
         </html>
       `;
 
-      const { uri } = await Print.printToFileAsync({ html });
+      const uri = await printToPdf(html);
       await sharePdf(uri, 'Share Statement of Account');
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
